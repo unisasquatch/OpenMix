@@ -90,9 +90,12 @@ public sealed class FusionPatch
         {
             string sp = kz.Value("sample_path") ?? kz.Child("sample_path")?.Items.OfType<string>().LastOrDefault() ?? "";
             if (string.IsNullOrWhiteSpace(sp)) continue;
-            // sample_path is relative to the patch dir. OpenMix plays a plain .ogg of the same name if one is present; it never reads the encrypted .mogg
+            // sample_path is relative to the patch dir and names the encrypted .mogg, which OpenMix never reads.
+            // It plays a plain stem of the same name that the user supplied beside it: a .ogg, or failing that a .wav.
             string full = Path.GetFullPath(Path.Combine(baseDir, sp));
-            string ogg = full.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) ? full : Path.ChangeExtension(full, ".ogg");
+            string ogg = full.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)
+                ? full
+                : Path.ChangeExtension(full, ".ogg") is var o && File.Exists(o) ? o : Path.ChangeExtension(full, ".wav");
 
             // stretch settings are either nested in (timestretch_settings …) (123 patches) or written
             // directly in the keyzone (773 patches, 622 of them tempo-synced) — read whichever is there
