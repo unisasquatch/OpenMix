@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>OpenMix</title>
+<link rel="stylesheet" href="/dm.css">
+<style>
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; overscroll-behavior: none; font-size: 15px; }
+
+  /* ---------- join ---------- */
+  #join { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 24px 18px; gap: 16px; max-width: 440px; width: 100%; margin: 0 auto; }
+  #join .logo { width: 82%; max-width: 340px; aspect-ratio: 4 / 1; object-fit: cover; margin: 0 auto 4px; }
+  #join p { margin: 0; color: var(--dim); text-align: center; }
+  #nameForm { display: flex; gap: 10px; }
+  #nameInput { flex: 1; min-width: 0; padding: 14px 16px; border-radius: 999px; border: 1px solid #333; background: #0c0c10; color: #fff; font: inherit; font-size: 17px; font-weight: 700; }
+  #joinErr { color: var(--orange); min-height: 1.3em; text-align: center; font-weight: 700; }
+  .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: var(--dim); font-weight: 800; margin: 4px 0 8px; }
+  .claim-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .claim { padding: 9px 14px; border-radius: 999px; background: #0c0c10; border: 1.5px dashed var(--orange); font-weight: 700; }
+  .claim.busy { border: 1px solid #333; color: var(--dim); cursor: default; font-weight: 500; }
+
+  /* ---------- game ---------- */
+  #game { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px 6px; padding-top: max(10px, env(safe-area-inset-top)); }
+  header .logo { height: 26px; width: 104px; object-fit: cover; }
+  header .me { font-weight: 800; margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  header .menu { padding: 4px 8px; font-size: 20px; line-height: 1; color: var(--dim); }
+
+  #modeBar { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 0; padding: 0 14px; font-weight: 800; text-align: center; }
+  #modeBar:not(:empty) { padding: 4px 14px 8px; }
+  .lanes-lobby { width: 100%; }
+  .plgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; max-height: 34vh; overflow-y: auto; width: 100%; }
+  .plgrid .pl { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border-radius: 10px; border: 1px solid #333; color: #bbb; font-size: 11px; font-weight: 800; background: #000; }
+  .plgrid .pl img { height: 30px; filter: invert(1) brightness(.75); }
+  .plgrid .pl.on { border-color: #fff; color: #fff; box-shadow: 0 0 10px #fff5; }
+  .plgrid .pl.on img { filter: invert(1); }
+  .pill.locked { opacity: .45; }
+  .recap { text-align: center; font-size: 12px; color: #ccc; } .recap .big { font-size: 34px; font-weight: 900; color: #fff; }
+  .lb { width: 100%; font-size: 12px; } .lbrow { display: flex; justify-content: space-between; padding: 2px 4px; border-bottom: 1px solid #222; }
+  .lanesbar { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+  .lanesbar > div { display: flex; flex-direction: column; align-items: center; min-width: 70px; }
+  .lanesbar small { font-size: 10px; color: var(--dim); letter-spacing: .12em; } .lanesbar b { font-size: 24px; }
+  .lanesbar .mid .tt { font-size: 14px; letter-spacing: .14em; } .lanesbar .low { color: var(--orange); }
+  .lanesbar.finale .tt { color: #f5c542; text-shadow: 0 0 10px #f5c542; }
+  .sb { display: flex; align-items: stretch; gap: 8px; width: 100%; }
+  .sb .tm { flex: 1; border-radius: 12px; border: 2px solid #222; padding: 4px 8px; display: flex; align-items: center; justify-content: space-between; background: #000; }
+  .sb .tm b { color: var(--team); letter-spacing: .14em; font-size: 12px; }
+  .sb .tm .n { font-family: var(--font-num); font-size: 26px; color: var(--team); line-height: 1; }
+  .sb .tm.turn { border-color: var(--team); box-shadow: 0 0 14px -2px var(--team); }
+  .sb .mid { display: flex; flex-direction: column; justify-content: center; align-items: center; min-width: 84px; font-size: 11px; color: var(--dim); }
+  .sb .mid .pips { display: flex; gap: 5px; margin: 3px 0; }
+  .sb .mid .pips i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--team); }
+  .sb .mid .pips i.full { background: var(--team); }
+  .sb .mid .tt { font-weight: 900; color: var(--team); letter-spacing: .08em; font-size: 12px; }
+  .lobby { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+  .lobby .row { display: flex; gap: 10px; }
+  .teambtn { flex: 1; border-radius: 14px; padding: 12px 8px; border: 2px solid var(--team); color: var(--team); background: #000; font-weight: 900; letter-spacing: .14em; }
+  .teambtn.mine { background: var(--team); color: #000; box-shadow: 0 0 18px -2px var(--team); }
+  .teambtn small { display: block; font-weight: 600; letter-spacing: 0; font-size: 11px; margin-top: 3px; color: inherit; opacity: .85; }
+  .freebar { font-size: 12px; background: #ffffff14; border-radius: 99px; padding: 4px 12px; margin-top: 6px; }
+  .tools { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .tools .pill { padding: 8px 14px; font-size: 11px; }
+  .dmcard .fx { font-size: 10.5px; line-height: 1.15; font-weight: 700; margin-top: 3px; }
+
+  #pads { margin: 6px 10px 2px; }
+
+  #hint { text-align: center; color: var(--dim); font-size: 13px; padding: 6px 16px 8px; min-height: 1.3em; font-weight: 600; }
+  #hint.active { color: #fff; }
+
+  #handWrap { flex: 1; min-height: 0; display: flex; flex-direction: column; background: linear-gradient(#0b0b0f, #000); border-top: 1px solid #1e1e26; }
+  .hand-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 6px; }
+  .hand-head h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .14em; color: var(--dim); }
+  .hand-head .pill { margin-left: auto; padding: 8px 16px; font-size: 11px; }
+  #hand { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px; padding: 8px 14px; padding-bottom: max(16px, env(safe-area-inset-bottom)); align-content: start; }
+  #hand { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  #hand.spread { display: block; position: relative; flex: none; overflow: visible; padding: 0; margin-top: 6px; }
+  #hand.spread .hcard { position: absolute; bottom: 10px; transition: left .25s ease, transform .2s ease, box-shadow .2s, opacity .2s;
+    box-shadow: -6px 0 14px #000c; }
+  #hand.spread .hcard.selected { transform: translateY(-30px) scale(1.05); box-shadow: 0 0 0 3px #fff, 0 10px 30px #000, 0 0 24px 4px #fff6; }
+  #hand .hcard { padding: 0; display: block; border-radius: 9px; transition: transform .12s, box-shadow .12s, opacity .12s; }
+  #hand .hcard.selected { transform: translateY(-6px); box-shadow: 0 0 0 3px #fff, 0 0 22px 4px #fff8; }
+  #hand .hcard.selected .pcard { box-shadow: none; }
+  #hand .hcard.unplayable { filter: brightness(.45) saturate(.6); }
+
+  #players { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 14px max(8px, env(safe-area-inset-bottom)); font-size: 12px; color: var(--dim); background: #000; }
+  #players span.p { background: #0c0c10; border: 1px solid #222; padding: 3px 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; }
+  #players span.p.turn { border-color: #fff; color: #fff; }
+
+  #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #fff; color: #000; font-weight: 800; padding: 10px 18px; border-radius: 999px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; text-align: center; z-index: 20; }
+  #toast.show { opacity: 1; }
+  #sheet { position: fixed; inset: 0; background: #000b; display: flex; align-items: flex-end; z-index: 10; }
+  #sheet .inner { width: 100%; background: #0c0c10; border-top: 1px solid #222; border-radius: 20px 20px 0 0; padding: 20px 16px; padding-bottom: max(18px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; }
+  #sheet .pill { width: 100%; }
+</style>
+<link rel="stylesheet" href="/phone.css">
+</head>
+<body>
+
+<!-- ============ JOIN ============ -->
+<section id="join">
+  <img class="logo" src="/ui/logo_dropmix_no_tm" alt="DropMix">
+  <p>Enter your name to join the table.</p>
+  <form id="nameForm" autocomplete="off">
+    <input id="nameInput" maxlength="24" placeholder="Your name" autocapitalize="words" enterkeyhint="go">
+    <button class="pill solid" type="submit">Join</button>
+  </form>
+  <div id="joinErr"></div>
+  <div id="claimBox" class="hidden">
+    <div class="section-label">Disconnected — tap to pick up their hand</div>
+    <div id="claimList" class="claim-list"></div>
+  </div>
+  <div id="busyBox" class="hidden">
+    <div class="section-label">Playing now</div>
+    <div id="busyList" class="claim-list"></div>
+  </div>
+</section>
+
+<!-- ============ GAME ============ -->
+<section id="game" class="hidden">
+  <header class="ptop">
+    <span class="me"><span class="dot" id="connDot"></span> <span id="meName"></span></span>
+    <span class="ttl" id="pTitle">DROPMIX</span>
+    <button class="menu" id="menuBtn" aria-label="Menu"><img src="/ui/sys_settings" alt=""></button>
+  </header>
+  <div id="modeBar"></div>
+  <div id="pads"></div>
+  <div id="hint">Tap a card, then tap a slot to drop it.</div>
+  <div id="handWrap">
+    <div class="hand-head"><h2>Your hand</h2>
+      <div class="tools"><button class="pill hidden" id="undoBtn">Take back</button><button class="pill" id="drawBtn">Draw</button>
+        <button class="dmbtn hidden" id="dmBtn" aria-label="DropMix button"></button></div></div>
+    <div id="hand"></div>
+  </div>
+  <div id="players"></div>
+</section>
+
+<div id="sheet" class="hidden">
+  <div class="inner">
+    <div id="sheetTitle" class="heavy" style="font-size:15px"></div>
+    <div id="sheetBody" style="display:flex;flex-direction:column;gap:12px"></div>
+    <button class="pill" id="sheetClose">Close</button>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="/board.js"></script>
+<script src="/mixgrid.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const LS = { get: k => { try { return localStorage.getItem(k); } catch { return null; } },
+             set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+             del: k => { try { localStorage.removeItem(k); } catch {} } };
+
+let me = { name: LS.get('dm_name'), token: LS.get('dm_token') };
+let state = null, selected = null, es = null, playersTimer = null;
+
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200); }
+async function api(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let data = null; try { data = await r.json(); } catch {}
+  return { ok: r.ok, status: r.status, data };
+}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const art = c => c.image ? `/art/${encodeURIComponent(c.image)}` : '';
+const power = p => p ? `<img class="power" src="/ui/sys_power_${Math.max(1, Math.min(3, p))}" alt="power ${p}">` : '';
+
+// ---------------- join ----------------
+async function refreshPlayers() {
+  try {
+    const list = await (await fetch('/api/players')).json();
+    const orphans = list.filter(p => p.status === 'Orphaned'), busy = list.filter(p => p.status !== 'Orphaned');
+    $('#claimBox').classList.toggle('hidden', !orphans.length);
+    $('#busyBox').classList.toggle('hidden', !busy.length);
+    $('#claimList').innerHTML = orphans.map(p => `<button class="claim" data-name="${esc(p.name)}">${esc(p.name)} · ${p.handCount} cards</button>`).join('');
+    $('#busyList').innerHTML = busy.map(p => `<span class="claim busy">${esc(p.name)}</span>`).join('');
+    $('#claimList').querySelectorAll('.claim').forEach(b => b.onclick = () => join(b.dataset.name));
+  } catch {}
+}
+
+async function join(name, silent) {
+  $('#joinErr').textContent = '';
+  const tokenForName = (me.name && me.token && name.toLowerCase() === me.name.toLowerCase()) ? me.token : null;
+  const r = await api('/api/join', { name, token: tokenForName });
+  if (!r.ok) {
+    if (!silent) $('#joinErr').textContent = r.data?.error || 'Could not join.';
+    showJoin(name);
+    return;
+  }
+  me = { name: r.data.name, token: r.data.token };
+  LS.set('dm_name', me.name); LS.set('dm_token', me.token);
+  if (r.data.outcome === 'Reclaimed') toast(`Picked up ${me.name}'s hand`);
+  showGame();
+}
+
+function showJoin(prefill) {
+  if (es) { es.close(); es = null; }
+  $('#game').classList.add('hidden'); $('#join').classList.remove('hidden');
+  if (prefill != null) $('#nameInput').value = prefill;
+  refreshPlayers();
+  clearInterval(playersTimer); playersTimer = setInterval(refreshPlayers, 3000);
+}
+
+$('#nameForm').onsubmit = e => { e.preventDefault(); const n = $('#nameInput').value.trim(); if (n) join(n); };
+
+// ---------------- game ----------------
+function showGame() {
+  clearInterval(playersTimer);
+  $('#join').classList.add('hidden'); $('#game').classList.remove('hidden');
+  $('#meName').textContent = me.name;
+  connect();
+}
+
+function connect() {
+  if (es) es.close();
+  es = new EventSource(`/api/stream?token=${encodeURIComponent(me.token)}`);
+  es.addEventListener('state', ev => { state = JSON.parse(ev.data); $('#connDot').classList.remove('off'); render(); });
+  es.addEventListener('kicked', async () => {
+    // Token invalid: host restarted, or another device picked up this name. Try to rejoin by name.
+    es.close(); es = null;
+    LS.del('dm_token');
+    const name = me.name; me.token = null;
+    const r = await api('/api/join', { name, token: null });
+    if (r.ok) {
+      me = { name: r.data.name, token: r.data.token };
+      LS.set('dm_name', me.name); LS.set('dm_token', me.token);
+      if (r.data.outcome === 'Created') toast('The table restarted — fresh hand.');
+      connect();
+      return;
+    }
+    $('#joinErr').textContent = r.status === 409 ? `"${name}" was picked up on another device.` : (r.data?.error || 'Disconnected.');
+    showJoin(name);
+  });
+  es.onerror = () => $('#connDot').classList.add('off');   // EventSource retries on its own
+}
+
+// Which pads a card may go on: the server's mode block is authoritative (state.mode.legal);
+// otherwise use each slot's accepted card types (the board's colour rules). Wild = anywhere.
+function legalPads(cid) {
+  const lp = state?.mode?.legal?.[cid];
+  if (Array.isArray(lp)) return lp;
+  const card = state?.hand?.find(c => c.cid === cid);
+  if (!card || card.type === 'Wild' || card.type === 'Fx') return null;
+  return state.pads.map(p => p.pad).filter(i => window.DM_ACCEPTS(state, i).includes(card.type));
+}
+function canPlayNow() { return state?.mode?.canPlay !== false; }
+
+let lastNotice = 0;
+function renderModeBar() {
+  const m = state.mode || {};
+  $('#pTitle').textContent = ({ freestyle: 'FREESTYLE', clash: 'CLASH', party: 'PARTY', lanes: 'PUZZLE', mixgrid: 'MIXGRID' })[m.id] || 'DROPMIX';
+  if (m.notice && m.notice.id !== lastNotice) { if (lastNotice) toast(m.notice.text); lastNotice = m.notice.id; }
+  if (m.id === 'lanes') { lanesBar(m); return; }
+  if (m.id === 'party') { partyBar(m); return; }
+  if (m.id === 'mixgrid') { mixgridBar(m); return; }
+  if (m.id !== 'clash' || m.phase !== 'play') document.getElementById('searchBox')?.remove();
+  if (m.id !== 'clash') { $('#modeBar').innerHTML = ''; return; }
+  const myTeam = m.you?.team;
+  const ICON = { red: m.icons?.red || 'fever', blue: m.icons?.blue || 'ouroboros' };
+  if (m.phase === 'lobby') {
+    const btn = (t, info) => `<button class="teambtn2 t-${t}${myTeam?.toLowerCase() === t ? ' mine' : ''}" data-team="${t}"><span class="cteam" style="width:44px;height:44px;-webkit-mask-image:url('/ui/${ICON[t]}');mask-image:url('/ui/${ICON[t]}')"></span>JOIN<small>${info.players.length ? info.players.map(esc).join(' & ') : 'nobody yet'}</small></button>`;
+    $('#modeBar').innerHTML = `<div class="lobby"><div style="color:#aaa;font-size:11px;letter-spacing:.2em">PICK A TEAM</div>
+      <div class="row">${btn('red', m.red)}${btn('blue', m.blue)}</div>
+      <button class="pill solid" id="startGame">START</button></div>`;
+    $('#modeBar').querySelectorAll('[data-team]').forEach(b => b.onclick = async () => { const r = await api('/api/team', { token: me.token, team: b.dataset.team }); if (!r.ok) toast(r.data?.error || 'Not now'); });
+    $('#startGame').onclick = async () => { const r = await api('/api/action', { token: me.token, action: 'start' }); if (!r.ok) toast(r.data?.error || 'Not yet'); };
+    return;
+  }
+  const cur = (m.current || '').toLowerCase(), target = m.target || 21;
+  const circ = (t, info) => { const on = m.phase === 'play' && cur === t, f = Math.min(1, info.score / target), C = 2 * Math.PI * 33;
+    return `<div class="cside${myTeam?.toLowerCase() === t ? ' mine' : ''}"><div class="ccirc ${on ? 'on' : 'off'}"><svg viewBox="0 0 72 72"><circle cx="36" cy="36" r="33" fill="none" stroke="${on ? '#0003' : '#ffffff26'}" stroke-width="3"/><circle cx="36" cy="36" r="33" fill="none" stroke="${on ? '#222' : '#fff'}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(f * C).toFixed(1)} ${C.toFixed(1)}"/></svg>${info.score}</div>
+      <span class="cteam" style="-webkit-mask-image:url('/ui/${ICON[t]}');mask-image:url('/ui/${ICON[t]}')"></span></div>`; };
+  const mine = myTeam && myTeam.toLowerCase() === cur;
+  const label = m.phase === 'over' ? `${(m.winner || '').toUpperCase()} WINS` : mine ? 'YOUR TURN' : `${(m.current || '').toUpperCase()}'S TURN`;
+  $('#modeBar').innerHTML = `<div style="width:100%"><div class="mstat">${circ('red', m.red)}<div class="mid">${label}
+      <div class="ppips2" style="margin-top:8px">${[0, 1].map(i => `<i class="${i < m.actionsLeft ? 'met' : 'pending'}"></i>`).join('')}</div>
+      <div class="lbl" style="margin-top:4px">${m.timerLeft != null && m.phase === 'play' ? Math.ceil(m.timerLeft) + 's · ' : ''}TO ${target}</div></div>${circ('blue', m.blue)}</div>
+      ${m.free ? `<div class="freebar">FREE ACTION: ${esc(m.free).toUpperCase()}</div>` : m.freeSpin ? `<div class="freebar">FREE SPIN — PRESS THE DROPMIX BUTTON</div>` : ''}</div>`;
+  // FX "search your deck": pick one card from your own deck into your hand
+  let sb = document.getElementById('searchBox');
+  if (m.search) {
+    if (!sb) { sb = document.createElement('div'); sb.id = 'searchBox'; document.body.appendChild(sb); }
+    const html = `<div style="position:fixed;inset:0;z-index:90;background:#000e;overflow:auto;padding:20px 14px">
+      <div style="text-align:center;font-weight:800;letter-spacing:.14em;margin:8px 0 16px">SEARCH YOUR DECK FOR 1 CARD</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px">${m.search.map(c => `<button data-cid="${c.cid}" style="all:unset;cursor:pointer;text-align:center">
+        <img src="/art/${encodeURIComponent(c.image)}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px" alt=""><div style="font-size:11px;margin-top:4px">${esc(c.name)}</div></button>`).join('')}</div></div>`;
+    if (sb._h !== html) { sb.innerHTML = html; sb._h = html; sb.querySelectorAll('[data-cid]').forEach(b => b.onclick = () => api('/api/action', { token: me.token, action: 'search', arg: b.dataset.cid }).then(r => { if (!r.ok) toast(r.data?.error || 'Not now'); })); }
+  } else if (sb) sb.remove();
+}
+
+// ---- MixGrid ----
+function mixgridBar(m) {
+  const bar = $('#modeBar');
+  if (!bar.querySelector('#mgP')) { bar.innerHTML = '<div id="mgP" style="width:100%"></div>'; bar.querySelector('#mgP').addEventListener('mgmsg', e => toast(e.detail)); }
+  MixGrid.render(bar.querySelector('#mgP'), m, (action, arg) => api('/api/action', { token: me.token, action, arg }).then(r => { if (!r.ok) toast(r.data?.error || 'Not now'); }), { phone: true });
+}
+
+// ---- Party ----
+let lastFoulP = 0, lastBumperP = 0;
+function partyBar(m) {
+  const act = (action, arg) => api('/api/action', { token: me.token, action, arg }).then(r => { if (!r.ok) toast(r.data?.error || 'Not now'); });
+  if (m.foul && m.foul.id !== lastFoulP) { lastFoulP = m.foul.id; toast(`${OMLoc.text('Party_PartyFoul', 'Foul!').toUpperCase()} ${m.foul.text}`); navigator.vibrate?.(300); }
+  if (m.bumper && m.bumper.id !== lastBumperP) { lastBumperP = m.bumper.id; toast(m.bumper.text); }
+  if (m.phase === 'lobby' || m.phase === 'over') {
+    const r = m.results;
+    $('#modeBar').innerHTML = `<div class="lobby lanes-lobby">
+      ${r ? `<div class="recap"><div class="big num">${m.score.toLocaleString()}</div>${r.newHigh ? `<b>${OMLoc.html('Party_NewHighScore', 'A new best!')}</b><br>` : ''}
+        Perfect ${r.perfect} · Met ${r.good} · Missed ${r.failed} · Fouls ${r.fouls}</div>` : ''}
+      <div style="color:var(--dim);font-size:12px;letter-spacing:.12em">PARTY · EVERYONE PLAYS TOGETHER</div>
+      <div class="row">${['Easy', 'Normal', 'Hard'].map(d => `<button class="pill${m.difficulty === d ? ' solid' : ''}" data-d="${d}">${d}</button>`).join('')}</div>
+      <button class="pill solid" id="startGame">${m.phase === 'over' ? 'Party again' : 'Start the party'}</button></div>`;
+    $('#modeBar').querySelectorAll('[data-d]').forEach(b => b.onclick = () => act('difficulty', b.dataset.d));
+    $('#startGame').onclick = () => act('start');
+    return;
+  }
+  const label = m.phase === 'intro' ? `${OMLoc.text('Party_Start', 'Here we go!')} ${OMLoc.text('Party_DrawCards', 'Take {0} cards', m.handSize)}` : m.phase === 'break' ? OMLoc.text('Party_RoundComplete', '{0} done', m.roundLabel) : m.roundLabel + (m.bonusPhase ? ' · BONUS' : '');
+  const bar = $('#modeBar');
+  if (!bar.querySelector('#ppTiles')) bar.innerHTML = `<div style="width:100%"><div class="lanesbar"><div><small>SCORE</small><b class="num" id="ppScore"></b></div>
+    <div class="mid"><span class="tt" id="ppLabel"></span></div><div><small>ENCORE</small><b style="font-size:13px" id="ppEnc"></b></div></div>
+    <div class="phone-tiles" id="ppTiles"></div><div id="ppPips"></div></div>`;
+  $('#ppScore').textContent = m.score.toLocaleString(); $('#ppLabel').textContent = label; $('#ppEnc').textContent = m.encoreAlive ? 'ALIVE' : '—';
+  const pips = window.renderPips(m); if ($('#ppPips')._h !== pips) { $('#ppPips').innerHTML = pips; $('#ppPips')._h = pips; }
+  window.updateTiles($('#ppTiles'), m);
+}
+
+// ---- Puzzle (Lanes) ----
+const pretty = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+function lanesBar(m) {
+  const act = (action, arg) => api('/api/action', { token: me.token, action, arg }).then(r => { if (!r.ok) toast(r.data?.error || 'Not now'); });
+  if (m.phase === 'lobby' || m.phase === 'over') {
+    const rec = m.recap;
+    const top = (m.leaderboard || []).slice(0, 5).map((e, i) => `<div class="lbrow"><span>${i + 1}. ${esc(pretty(e.name))}${e.hard ? ' (Fever)' : ''}</span><b class="num">${e.score.toLocaleString()}</b></div>`).join('');
+    $('#modeBar').innerHTML = `<div class="lobby lanes-lobby">
+      ${rec ? `<div class="recap"><div class="big num">${m.score.toLocaleString()}</div>
+        <div>White ${rec.white} · Gold ${rec.gold} · Rainbow ${rec.rainbow} · Full clears ${rec.fullClears}</div>
+        <div>Biggest block ${rec.biggest} → +${rec.bonus}${rec.unlocked ? ' · <b>Fever unlocked!</b>' : ''}</div></div>` : ''}
+      <div style="color:var(--dim);font-size:12px;letter-spacing:.12em">PUZZLE · PICK TWO PLAYLISTS</div>
+      <div class="plgrid">${(m.allPlaylists || []).map(pl => `<button class="pl${m.playlists.includes(pl) ? ' on' : ''}" data-pl="${pl}"><img src="/ui/i_${pl}" alt="">${pretty(pl)}</button>`).join('')}</div>
+      <div class="row"><button class="pill${m.hard ? '' : ' solid'}" data-d="normal">Normal</button><button class="pill${m.hard ? ' solid' : ''}${m.hardUnlocked ? '' : ' locked'}" data-d="hard">Fever${m.hardUnlocked ? '' : ' (locked)'}</button></div>
+      <button class="pill solid" id="startGame">${m.phase === 'over' ? 'Play again' : 'Start'}</button>
+      ${top ? `<div class="lb">${top}</div>` : ''}</div>`;
+    $('#modeBar').querySelectorAll('[data-pl]').forEach(b => b.onclick = () => act('playlist', b.dataset.pl));
+    $('#modeBar').querySelectorAll('[data-d]').forEach(b => b.onclick = () => act('difficulty', b.dataset.d));
+    $('#startGame').onclick = () => act('start');
+    return;
+  }
+  const label = { shuffle: 'SHUFFLING…', spawning: 'INCOMING', play: 'YOUR MOVE', spinning: 'EQ!', finale: 'FINALE' }[m.phase] || '';
+  const t = m.timerLeft != null ? `<span class="${m.timerLeft <= 2 ? 'low' : ''}">${Math.ceil(m.timerLeft)}s</span>` : '';
+  $('#modeBar').innerHTML = `<div class="mstat">${m.phase === 'finale' ? `<div class="lbl" style="font-size:14px;color:#fff">★ FINALE</div>` : `<div style="display:flex;align-items:center;gap:8px"><span class="big">${m.actionsLeft}</span><span class="lbl" style="line-height:1.2">ACTIONS<br>REMAINING</span></div>`}
+    <div class="mid">${label}${m.hard ? ' · FEVER' : ''} ${t}</div><div style="text-align:right"><div class="lbl">SCORE</div><div class="big">${m.score.toLocaleString()}</div></div></div>`;
+}
+
+function render() {
+  if (!state) return;
+  renderModeBar();
+
+  // the board: wells glow in the colours each slot accepts
+  const lanes = state.mode?.id === 'lanes' && state.mode.lanes && !['lobby', 'over'].includes(state.mode.phase) ? state.mode.lanes : null;
+  window.renderBoard($('#pads'), state, { selectedCid: selected, legal: selected ? legalPads(selected) : null, onTap: padTap, size: 'phone',
+    above: lanes ? (i => window.renderLane(lanes[i], i)) : null });
+
+  // hand
+  if (selected && !state.hand.some(c => c.cid === selected)) selected = null;
+  const myTurn = canPlayNow();
+  $('#hand').innerHTML = state.hand.length ? state.hand.map(c => {
+    const lp = legalPads(c.cid);
+    const playable = myTurn && (lp === null || lp.length > 0);   // e.g. a Lead with no yellow slot
+    return `<button class="hcard${selected === c.cid ? ' selected' : ''}${playable ? '' : ' unplayable'}" data-cid="${esc(c.cid)}">${window.renderPhysCard(c)}</button>`;
+  }).join('') : `<div style="color:#888;padding:14px;font-size:12px;letter-spacing:.16em">${state.mode?.allowDraw === false ? 'NO CARDS YET' : 'NO CARDS — TAP DRAW'}</div>`;
+  $('#hand').querySelectorAll('.hcard').forEach(el => el.onclick = () => {
+    selected = selected === el.dataset.cid ? null : el.dataset.cid; render();
+  });
+  layoutHand();
+
+  const h = $('#hint');
+  if (!myTurn) { h.textContent = state.mode?.waitText || 'Waiting…'; h.classList.remove('active'); }
+  else if (selected) { const c = state.hand.find(x => x.cid === selected); h.textContent = `Drop “${c?.name}” on a slot ↑`; h.classList.add('active'); }
+  else { h.textContent = 'Tap a card, then tap a slot to drop it.'; h.classList.remove('active'); }
+  $('#drawBtn').classList.toggle('hidden', state.mode?.allowDraw === false);
+  $('#undoBtn').classList.toggle('hidden', !state.mode?.allowUndo);
+  const showDm = (state.mode?.id === 'clash' && state.mode.phase === 'play' && state.mode.you?.team === state.mode.current)
+    || (state.mode?.id === 'lanes' && ['play', 'spawning', 'spinning'].includes(state.mode.phase))
+    || (state.mode?.id === 'party' && ['play', 'roundIntro'].includes(state.mode.phase));
+  $('#dmBtn').classList.toggle('hidden', !showDm);
+  $('#dmBtn').classList.toggle('armed', !!(showDm && state.mode.buttonArmed));
+  $('#game').classList.toggle('lobby-mode', state.mode?.phase === 'lobby');
+  $('#game').classList.toggle('mixgrid-mode', state.mode?.id === 'mixgrid');
+
+  $('#players').innerHTML = state.players.map(p =>
+    `<span class="p${state.mode?.turn === p.name ? ' turn' : ''}"><span class="dot${p.status === 'Orphaned' ? ' off' : ''}"></span>${esc(p.name)} · ${p.handCount}</span>`).join('');
+}
+
+// The hand is spread across the table like a swiped deck: one overlapping row, each card's left
+// edge (power, artist, instruments) showing. The selected card lifts above the row, fully visible.
+function layoutHand() {
+  const el = $('#hand'), cards = [...el.querySelectorAll('.hcard')];
+  el.classList.toggle('spread', cards.length > 0);
+  if (!cards.length) { el.style.height = ''; return; }
+  const W = el.clientWidth - 28, n = cards.length;
+  const room = innerHeight - el.getBoundingClientRect().top - ($('#players')?.offsetHeight || 36) - 56;   // fit the space below
+  const cw = Math.max(96, Math.min(240, W * 0.56, room * 63 / 96)), ch = cw * 96 / 63;
+  const step = n > 1 ? Math.min(cw * 0.92, (W - cw) / (n - 1)) : 0;
+  const x0 = 14 + Math.max(0, (W - (cw + step * (n - 1))) / 2);
+  el.style.height = `${ch + 46}px`;
+  cards.forEach((c, i) => {
+    const sel = c.classList.contains('selected');
+    c.style.width = `${cw}px`;
+    c.style.left = `${x0 + i * step}px`;
+    c.style.zIndex = sel ? 100 : i + 1;
+  });
+}
+addEventListener('resize', () => layoutHand());
+
+async function padTap(pad) {
+  if (selected) {
+    const lp = legalPads(selected);
+    if (lp !== null && !lp.includes(pad)) { toast(state.mode?.illegalText || "That card can't go there."); return; }
+    const cid = selected; selected = null; render();
+    const r = await api('/api/play', { token: me.token, cid, pad });
+    if (r.status === 401) return lostToken();
+    if (!r.ok) toast(r.data?.error || 'Could not play that card.');
+    return;
+  }
+  const p = state.pads[pad];
+  if (!p.top) { toast('Pick a card from your hand first.'); return; }
+  const actions = (p.source === 'Player' && state.mode?.allowClear !== false)
+    ? [{ label: 'Clear this slot', act: async () => { await api('/api/clear', { token: me.token, pad }); } }] : [];
+  openSheet(`Slot ${pad + 1} · ${p.top.name}`, actions,
+    `${p.top.artist} · ${p.top.type}${p.top.bpm ? ' · ' + Math.round(p.top.bpm) + ' BPM' : ''}${p.top.key && p.top.key !== 'None' ? ' · ' + p.top.key + ' ' + p.top.mode : ''}`);
+}
+
+function openSheet(title, actions, subtitle) {
+  $('#sheetTitle').textContent = title;
+  $('#sheetBody').innerHTML = (subtitle ? `<div style="color:var(--dim)">${esc(subtitle)}</div>` : '') +
+    actions.map((a, i) => `<button class="pill solid" data-i="${i}">${esc(a.label)}</button>`).join('');
+  $('#sheetBody').querySelectorAll('button').forEach(b => b.onclick = async () => { closeSheet(); await actions[+b.dataset.i].act(); });
+  $('#sheet').classList.remove('hidden');
+}
+function closeSheet() { $('#sheet').classList.add('hidden'); }
+$('#sheetClose').onclick = closeSheet;
+$('#sheet').onclick = e => { if (e.target.id === 'sheet') closeSheet(); };
+
+$('#undoBtn').onclick = async () => { const r = await api('/api/undo', { token: me.token }); if (!r.ok) toast(r.data?.error || "Can't take that back."); };
+$('#dmBtn').onclick = async () => { const r = await api('/api/button', { token: me.token }); if (!r.ok) toast(r.data?.error || 'Not now.'); };
+$('#drawBtn').onclick = async () => { const r = await api('/api/draw', { token: me.token }); if (r.status === 401) lostToken(); else if (!r.ok) toast(r.data?.error || "Can't draw now."); };
+$('#menuBtn').onclick = () => openSheet(me.name, [
+  { label: 'Switch device / name', act: async () => { if (es) es.close(); es = null; me.token = null; LS.del('dm_token'); showJoin(''); } },
+  { label: 'Leave the game (return my cards)', act: async () => { await api('/api/leave', { token: me.token }); LS.del('dm_token'); LS.del('dm_name'); me = { name: null, token: null }; showJoin(''); } },
+]);
+
+function lostToken() { LS.del('dm_token'); me.token = null; $('#joinErr').textContent = 'Your session ended — join again.'; showJoin(me.name || ''); }
+
+// ---------------- boot ----------------
+if (me.name && me.token) join(me.name, true); else showJoin(me.name || '');
+</script>
+</body>
+</html>
