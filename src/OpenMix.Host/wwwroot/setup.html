@@ -57,6 +57,7 @@
     <p>OpenMix needs the DropMix app (<code>.apk</code>) and its expansion file (<code>.obb</code>) from your phone. OpenMix supports DropMix 1.9.0, the last release.</p>
     <div class="row">
       <button id="adb">Copy from my phone</button>
+      <button id="installadb" class="alt" style="display:none">Install adb</button>
       <span class="fine" id="adbnote">Android phone with DropMix installed, plugged in by USB with USB debugging on.</span>
     </div>
     <p style="margin-top:14px">Or choose files you already copied:</p>
@@ -87,14 +88,29 @@
   const $ = id => document.getElementById(id);
   const mb = n => (n / 1048576).toFixed(0) + ' MB';
   let st = {};
+  function adbNote(s) {
+    if (s.adbInstalling) return 'Downloading Android platform-tools from Google (~15 MB)…';
+    if (!s.adb) return "adb isn't installed. Click “Install adb” to download Google's Android platform-tools (~15 MB), or just choose the files below instead.";
+    switch (s.phone) {
+      case 'ready': return 'Phone detected — ready to copy.';
+      case 'unauthorized': return 'Phone found. On the phone, tap “Allow” (or “Always allow”) on the USB-debugging prompt, then try again.';
+      case 'offline': return 'Phone found but not responding — replug the USB cable or unlock the phone.';
+      case 'none': return 'No phone detected. Plug it in by USB, turn on USB debugging, and allow this computer.';
+      default: return 'Android phone with DropMix installed, plugged in by USB with USB debugging on.';
+    }
+  }
   async function poll() {
     try { st = await (await fetch('/api/setup/status')).json(); } catch { return; }
     $('where').textContent = st.content;
     $('apkst').textContent = st.apk ? 'APK ready (' + mb(st.apk) + ')' : 'none yet'; $('apkst').className = 'file' + (st.apk ? ' ok' : '');
     $('obbst').textContent = st.obb ? 'OBB ready (' + mb(st.obb) + ')' : 'none yet'; $('obbst').className = 'file' + (st.obb ? ' ok' : '');
-    const busy = st.state === 'pulling' || st.state === 'importing';
+    const busy = st.state === 'pulling' || st.state === 'importing' || st.adbInstalling;
     $('adb').disabled = busy || !st.adb;
-    if (!st.adb) $('adbnote').textContent = 'Needs Android platform-tools (adb). Or choose the files below.';
+    const inst = $('installadb');
+    inst.style.display = st.adb ? 'none' : '';
+    inst.disabled = busy;
+    inst.textContent = st.adbInstalling ? 'Installing adb…' : 'Install adb';
+    $('adbnote').textContent = adbNote(st);
     $('go').disabled = busy || !st.apk || !st.obb || st.state === 'done';
     $('go').textContent = st.state === 'importing' ? 'Importing…' : st.state === 'done' ? 'Imported' : 'Import';
     $('done').disabled = st.state !== 'done';
@@ -115,6 +131,7 @@
     post('/api/setup/upload/' + k, f);
   };
   $('adb').onclick = () => post('/api/setup/adb');
+  $('installadb').onclick = () => post('/api/setup/install-adb');
   $('go').onclick = () => post('/api/setup/start');
   $('done').onclick = () => { $('done').disabled = true; $('done').textContent = 'Starting…'; post('/api/setup/finish'); };
   poll(); setInterval(poll, 700);
