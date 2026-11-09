@@ -38,18 +38,39 @@ OpenMix builds its content from **your own copy** of DropMix version **1.9.0**, 
    start or delete downloads, not phones on your network. You can delete the downloaded content there too.
 
 Where your data goes:
-- **Your PC:** everything OpenMix builds or downloads is stored in `%LOCALAPPDATA%\OpenMix`.
+- **Your PC:** everything OpenMix builds or downloads is stored in `%LOCALAPPDATA%\OpenMix`. The one exception is
+  your verified-cards save (below), which sits in the install folder so it's easy to find and copy.
 - **Your Wi-Fi:** phones on your network can open the game page to play.
 - **The internet:** OpenMix contacts nothing except the card server, and only after you pick Download My Collection.
 
 Ownership checks are part of normal use. They are not tamper-proof copy protection. A card's signature covers its
 serial number but not which card it is; that's how DropMix cards were designed.
 
+### Moving your verified cards to another PC
+
+Every card you add on your board is also saved to `saves\verified-cards.json` in OpenMix's install folder
+(by default `%LOCALAPPDATA%\Programs\OpenMix\saves`). The file holds each card's serial and the signature your board
+returned for it. Nothing else is stored, and it never leaves your PC unless you copy it.
+
+To use your cards on another of your PCs without the board:
+
+1. Install OpenMix there and run its setup.
+2. Copy `verified-cards.json` into that PC's `saves` folder (create the folder if it isn't there yet).
+3. Start OpenMix. It checks every signature again and adds the cards that pass, so you go straight past
+   Add to Collection. Phones can play and you can download your cards' content as usual.
+
+What's checked on import: each signature must verify against the cards' public key, and which card an entry is always
+comes from its serial, never from anything else in the file. A signed serial counts as one card only, so a save can
+never hold more cards than you verified on a board. Cards you add later on either PC are saved to that PC's file, so
+copy it again to bring them over. Updating or uninstalling OpenMix leaves the `saves` folder alone. Resetting your
+collection empties the save but first keeps a copy beside it as `verified-cards.before-reset.json`.
+
 ### Song audio
 
 DropMix's song stems are encrypted. **OpenMix does not decrypt them and does not include any way to.** It plays
 the parts it can read: MIDI, sampler instruments, voice lines and sound effects. It also plays standard
-`.ogg`/`.wav` stems when they're present in a song's folder.
+`.ogg`/`.wav` stems when they're present in a song's folder. To add your own, see
+[Getting Started: Add Your Own Song Stems](docs/GETTING_STARTED.md).
 
 ## Requirements
 
