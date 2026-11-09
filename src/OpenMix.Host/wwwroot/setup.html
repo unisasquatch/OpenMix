@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMix setup</title>
+<style>
+  :root { --bg: #111117; --panel: #1c1c25; --line: #2e2e3a; --text: #ececf1; --muted: #9a9aab; --accent: #f5c518; --ok: #27ae60; --bad: #e8453c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 20px 60px; }
+  h1 { font-size: 34px; margin: 0 0 4px; letter-spacing: .5px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .bars { display: inline-flex; gap: 4px; vertical-align: middle; margin-right: 12px; }
+  .bars i { display: block; width: 7px; border-radius: 4px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; margin-bottom: 16px; }
+  section h2 { font-size: 18px; margin: 0 0 8px; }
+  section p { margin: 6px 0; color: var(--muted); }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+  button, label.btn { background: var(--accent); color: #111; border: 0; border-radius: 10px; padding: 10px 18px; font: 600 15px "Segoe UI", sans-serif; cursor: pointer; }
+  button.alt, label.btn.alt { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=file] { display: none; }
+  .file { color: var(--muted); font-size: 14px; }
+  .file.ok { color: var(--ok); }
+  pre { background: #0b0b10; border: 1px solid var(--line); border-radius: 10px; padding: 12px; height: 220px; overflow: auto; font: 12.5px/1.45 Consolas, monospace; color: #c9c9d6; margin: 12px 0 0; white-space: pre-wrap; }
+  .err { color: var(--bad); margin-top: 10px; min-height: 1em; }
+  .fine { font-size: 13px; color: var(--muted); }
+  code { background: #0b0b10; padding: 1px 6px; border-radius: 5px; }
+</style>
+<script>
+  // OpenMix host token: given to this window in its URL (#t=...), sent only with this page's own API requests
+  (() => {
+    const m = /[#&]t=([0-9A-F]+)/i.exec(location.hash || '');
+    try { if (m) { sessionStorage.setItem('om-token', m[1]); history.replaceState(null, '', location.pathname + location.search); } } catch { }
+    let t = null; try { t = sessionStorage.getItem('om-token'); } catch { }
+    if (!t) return;
+    const f = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.startsWith('/api/') || url.startsWith(location.origin + '/api/')) {
+        init = Object.assign({}, init); const h = new Headers(init.headers || {}); h.set('X-OpenMix-Token', t); init.headers = h;
+      }
+      return f(input, init);
+    };
+  })();
+</script>
+</head>
+<body>
+<main>
+  <h1><span class="bars"><i style="height:18px;background:#F5C518"></i><i style="height:26px;background:#E8453C"></i><i style="height:32px;background:#F2F2F2"></i><i style="height:22px;background:#2F80ED"></i><i style="height:14px;background:#27AE60"></i></span>OpenMix setup</h1>
+  <p class="sub">OpenMix is an unofficial, fan-made player for DropMix boards and cards. It ships with none of the game's
+    content: it builds everything from <b>your own copy</b> of the DropMix app. Not affiliated with Hasbro or Harmonix.</p>
+
+  <section>
+    <h2>1. Get your game files</h2>
+    <p>OpenMix needs the DropMix app (<code>.apk</code>) and its expansion file (<code>.obb</code>) from your phone. OpenMix supports DropMix 1.9.0, the last release.</p>
+    <div class="row">
+      <button id="adb">Copy from my phone</button>
+      <span class="fine" id="adbnote">Android phone with DropMix installed, plugged in by USB with USB debugging on.</span>
+    </div>
+    <p style="margin-top:14px">Or choose files you already copied:</p>
+    <div class="row">
+      <label class="btn alt" for="apk">Choose APK…</label><input id="apk" type="file" accept=".apk"><span class="file" id="apkst">none yet</span>
+    </div>
+    <div class="row">
+      <label class="btn alt" for="obb">Choose OBB…</label><input id="obb" type="file" accept=".obb"><span class="file" id="obbst">none yet</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Build OpenMix's content</h2>
+    <p>Takes a minute or two. Everything stays on this computer, in <code id="where">…</code>.</p>
+    <div class="row"><button id="go" disabled>Import</button></div>
+    <div class="err" id="err"></div>
+    <pre id="log"></pre>
+  </section>
+
+  <section>
+    <h2>3. Play</h2>
+    <p>Next, OpenMix opens. Connect your DropMix board and add your cards to your collection. When you're ready, download
+      your cards' art and music from <b>Settings → Card Content → Download My Collection</b>; nothing downloads before then.</p>
+    <div class="row"><button id="done" disabled>Start OpenMix</button></div>
+  </section>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  const mb = n => (n / 1048576).toFixed(0) + ' MB';
+  let st = {};
+  async function poll() {
+    try { st = await (await fetch('/api/setup/status')).json(); } catch { return; }
+    $('where').textContent = st.content;
+    $('apkst').textContent = st.apk ? 'APK ready (' + mb(st.apk) + ')' : 'none yet'; $('apkst').className = 'file' + (st.apk ? ' ok' : '');
+    $('obbst').textContent = st.obb ? 'OBB ready (' + mb(st.obb) + ')' : 'none yet'; $('obbst').className = 'file' + (st.obb ? ' ok' : '');
+    const busy = st.state === 'pulling' || st.state === 'importing';
+    $('adb').disabled = busy || !st.adb;
+    if (!st.adb) $('adbnote').textContent = 'Needs Android platform-tools (adb). Or choose the files below.';
+    $('go').disabled = busy || !st.apk || !st.obb || st.state === 'done';
+    $('go').textContent = st.state === 'importing' ? 'Importing…' : st.state === 'done' ? 'Imported' : 'Import';
+    $('done').disabled = st.state !== 'done';
+    if (!st.assetStudio) $('err').textContent = "OpenMix's tools folder is incomplete; reinstall OpenMix.";
+    const log = $('log'), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+    log.textContent = (st.log || []).join('\n');
+    if (atEnd) log.scrollTop = log.scrollHeight;
+  }
+  async function post(url, body) {
+    $('err').textContent = '';
+    const r = await fetch(url, { method: 'POST', body });
+    if (!r.ok) { let m = 'Something went wrong (' + r.status + ').'; try { m = (await r.json()).error || m; } catch {} $('err').textContent = m; }
+    poll();
+  }
+  for (const k of ['apk', 'obb']) $(k).onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    $(k + 'st').textContent = 'copying ' + f.name + '…';
+    post('/api/setup/upload/' + k, f);
+  };
+  $('adb').onclick = () => post('/api/setup/adb');
+  $('go').onclick = () => post('/api/setup/start');
+  $('done').onclick = () => { $('done').disabled = true; $('done').textContent = 'Starting…'; post('/api/setup/finish'); };
+  poll(); setInterval(poll, 700);
+</script>
+</body>
+</html>

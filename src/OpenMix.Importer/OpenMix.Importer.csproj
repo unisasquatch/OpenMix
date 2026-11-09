@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows10.0.26100.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\content_manifest.tsv" LogicalName="OpenMix.Importer.Resources.content_manifest.tsv" />
+    <EmbeddedResource Include="Resources\loc_manifest.tsv" LogicalName="OpenMix.Importer.Resources.loc_manifest.tsv" />  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenMix.Board\OpenMix.Board.csproj" />
+  </ItemGroup>
+
+</Project>
