@@ -1,0 +1,13 @@
+bin/
+obj/
+build/
+*.user
+.vs/
+# never commit game content
+/data/
+/assets_raw/
+/audio_unpacked/
+/cardassets/
+*.apk
+*.obb
+*.mogg

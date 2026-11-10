@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.18362.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>OpenMix.Host</RootNamespace>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>OpenMix</AssemblyName>
+    <Version>0.1.0</Version>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="app.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenMix.Game\OpenMix.Game.csproj" />
+    <ProjectReference Include="..\OpenMix.Audio\OpenMix.Audio.csproj" />
+    <ProjectReference Include="..\OpenMix.Board\OpenMix.Board.csproj" />
+    <ProjectReference Include="..\OpenMix.Cards\OpenMix.Cards.csproj" />
+    <ProjectReference Include="..\OpenMix.Importer\OpenMix.Importer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+  </ItemGroup>
+
+</Project>

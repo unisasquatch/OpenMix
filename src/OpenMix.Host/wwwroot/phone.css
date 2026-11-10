@@ -1,0 +1,93 @@
+/* Phones in the original app's visual language (docs/ORIGINAL_UI.md): dot background, grey top bar,
+   Avenir caps with wide tracking, neon shell_slot frames, white request tiles with the request sprites. */
+body { background: #050505; }
+body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(#ffffff26 1.2px, transparent 1.6px) 0 0 / 7px 7px; }
+
+/* top bar: grey strip, centred title, controls at the edges */
+header.ptop { position: relative; display: flex; align-items: center; justify-content: space-between; height: 52px; padding: 0 14px;
+  padding-top: env(safe-area-inset-top); background: #141414; box-shadow: 0 1px 0 #ffffff10; }
+header.ptop .ttl { position: absolute; left: 0; right: 0; text-align: center; pointer-events: none; font-size: 17px; letter-spacing: .2em; font-weight: 400; }
+header.ptop .me { position: relative; margin: 0; font-weight: 400; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: #ccc; }
+header.ptop .menu { position: relative; width: 30px; height: 30px; border-radius: 50%; background: #fff; display: grid; place-items: center; padding: 0; }
+header.ptop .menu img { width: 22px; filter: brightness(0); }
+
+#hint { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; font-weight: 400; color: #999; }
+#hint.active { color: #fff; }
+.hand-head h2 { font-weight: 400; letter-spacing: .2em; color: #aaa; }
+#handWrap { background: transparent; border-top: 1px solid #ffffff14; }
+#players span.p { background: #000a; border-color: #ffffff20; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+#toast { font-weight: 800; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; }
+.pill { font-weight: 800; letter-spacing: .16em; }
+
+/* ---- slots: neon frames when empty, card art + power bars when filled ---- */
+/* sized by the screen's height too, so a 16:9 display doesn't blow the slots up past the screen; each slot reserves
+   its own VU headroom (grid-item % margins resolve against the column width, so it scales with the slot) */
+.dmboard.small.orig { background: none; box-shadow: none; padding: 4px max(4px, 2vw) max(6px, 1.5vh); gap: 7px;
+  width: 100%; max-width: min(100% - 20px, 120vh); align-self: center; box-sizing: border-box; }
+.dmboard.small.orig .pslot { margin-top: calc(44% + 6px); }
+.dmboard.small.orig::before { display: none; }
+.pslot { position: relative; width: 100%; aspect-ratio: 1; }
+.pslot .frame { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); filter: drop-shadow(0 0 4px var(--g1)) drop-shadow(0 0 4px var(--g2)); }
+.pslot .art { position: absolute; inset: 0; border-radius: 4px; overflow: hidden; background: #000; }
+.pslot .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pslot .vu { position: absolute; left: 6%; right: 6%; bottom: 100%; height: 44%; margin-bottom: 3px; display: flex; gap: 3px; }
+.pslot .vu i { flex: 1; background: #ffffff1a; }
+.pslot .vu i.on { background: var(--c); }
+.pslot .vu i:nth-child(1) { clip-path: polygon(0 55%, 100% 37%, 100% 100%, 0 100%); }
+.pslot .vu i:nth-child(2) { clip-path: polygon(0 37%, 100% 18%, 100% 100%, 0 100%); }
+.pslot .vu i:nth-child(3) { clip-path: polygon(0 18%, 100% 0, 100% 100%, 0 100%); }
+.pslot .x { position: absolute; inset: 8%; background: url('/ui/sys_remove_card_icon') center / contain no-repeat; animation: blink .5s steps(2) infinite; }
+.pslot .bad { position: absolute; inset: 0; background: #000a url('/ui/sys_blocked_icon') center / 62% no-repeat; }
+.pslot.target .frame, .pslot.target .art { filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 10px #fff); }
+.pslot.target { animation: pslot-pulse .9s ease-in-out infinite; }
+@keyframes pslot-pulse { 50% { transform: scale(1.05); } }
+.pslot.dead { opacity: .25; }
+.pslot.owned .art { box-shadow: 0 0 0 3px var(--team), 0 0 14px 2px var(--team); }
+.pslot .team { position: absolute; right: -7px; top: -7px; width: 24px; height: 24px; border-radius: 50%; background: var(--team);
+  display: grid; place-items: center; box-shadow: 0 0 0 2px #000, 0 0 8px var(--team); z-index: 2; }
+.pslot .team i { width: 16px; height: 16px; background: #fff; -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; }
+.dmboard.small.orig .winfo strong.tm { display: block; font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.dmboard.small.orig .winfo b { font-weight: 800; font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+.dmboard.small.orig .winfo em { font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
+
+/* ---- Party request tiles on the phone (PartyRequest + request visuals) ---- */
+.phone-tiles { display: flex; justify-content: center; gap: 10px; }
+.ptile2 { position: relative; width: 82px; height: 102px; border-radius: 6px; background: #fff; color: #000; overflow: hidden; }
+.ptile2 .drain { position: absolute; left: 0; right: 0; top: 0; background: #5b5b5b; }
+.ptile2 .line { position: absolute; left: -4px; right: -4px; height: 4px; margin-top: -2px; background: #fff; box-shadow: 0 0 6px #fff; }
+.ptile2 .ico { position: absolute; inset: 0 0 14px; display: grid; place-items: center; }
+.ptile2 .ico img { width: 72px; } .ptile2 .ico img.inst { filter: brightness(0); }
+.ptile2 .lab { position: absolute; left: 0; right: 0; bottom: 5px; text-align: center; font-size: 8px; font-weight: 800; letter-spacing: .1em; }
+.ptile2.perfect { background: var(--om-PartyRequest-perfectBackgroundColor); } .ptile2.failed { background: var(--om-PartyRequest-failedBackgroundColor); }
+.ptile2 .res { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.ptile2 .res img { width: 52px; filter: brightness(0); } .ptile2 .res b { font-family: var(--font-num); font-size: 22px; }
+.ppips2 { display: flex; justify-content: center; gap: 4px; margin: 6px 0 2px; }
+.ppips2 i { width: 11px; height: 14px; background: center / contain no-repeat; }
+.ppips2 .pending, .ppips2 .bonus { background-image: url('/ui/sys_pip_regular_upcoming'); } .ppips2 .bonus { opacity: .4; }
+.ppips2 .met, .ppips2 .skipped { background-image: url('/ui/sys_pip_regular_met'); }
+.ppips2 .perfect { background-image: url('/ui/sys_pip_regular_perfect'); } .ppips2 .failed { background-image: url('/ui/sys_pip_regular_missed'); }
+
+/* ---- mode bars ---- */
+.mstat { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; }
+.mstat .lbl { font-size: 10px; letter-spacing: .16em; color: #aaa; text-transform: uppercase; }
+.mstat .big { font-family: var(--font-num); font-weight: 700; font-size: 28px; line-height: 1; }
+.mstat .mid { flex: 1; text-align: center; font-size: 13px; letter-spacing: .18em; text-transform: uppercase; }
+.ccirc { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-num); font-weight: 700; font-size: 30px; position: relative; }
+.ccirc.off { background: #1c1c1e; color: #111; -webkit-text-stroke: 1.5px #fff; }
+.ccirc.on { background: #fff; color: #555; box-shadow: 0 0 0 2px #fff, 0 0 16px 4px #fff8; }
+.ccirc svg { position: absolute; inset: -4px; width: 72px; height: 72px; transform: rotate(-90deg); }
+.cteam { width: 26px; height: 26px; background: #fff; -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; }
+.cside { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.cside.mine::after { content: "YOU"; font-size: 9px; letter-spacing: .2em; color: #aaa; }
+.teambtn2 { flex: 1; border-radius: 10px; padding: 14px 8px 10px; border: 2px solid var(--team); background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  box-shadow: 0 0 10px -2px var(--team); letter-spacing: .16em; font-size: 13px; }
+.teambtn2.mine { background: #ffffff14; box-shadow: 0 0 0 2px #fff, 0 0 18px -2px var(--team); }
+.teambtn2 small { font-size: 10px; letter-spacing: .06em; color: #aaa; text-transform: uppercase; }
+
+/* Puzzle lanes on the phone: LanesRequest look (dark tile + white border, light grey when merged into a block) */
+.lane .lc.req.o { background: #1f1f1f !important; border: 1.5px solid #f2f2f2 !important; box-shadow: none !important; display: grid; place-items: center; border-radius: 4px; }
+.lane .lc.req.o.blk { background: #a8a5a0 !important; border-color: #d9d6d0 !important; }
+.lane .lc.req.o img { position: absolute; left: 6%; top: 6%; width: 88%; height: 88%; object-fit: contain; }
+.dmboard.small.orig .lane { height: 236px; width: 94%; gap: 3px; }
+.dmboard.small.orig.has-lanes .pslot { width: 86%; margin-inline: auto; }

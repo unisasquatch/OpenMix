@@ -1,0 +1,91 @@
+/* The original app's look, on a 1920x1080 stage scaled to fit (like Unity's CanvasScaler).
+   Measurements come from the device recording (docs/ORIGINAL_UI.md); sprites from assets_raw. */
+:root {
+  --o-avenir: "DropMix Avenir", "Avenir Next", "Avenir", "Century Gothic", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --o-din: "DropMix DIN", "DIN Alternate", "DIN Condensed", "Bahnschrift", "Roboto Condensed", Arial, sans-serif;
+  --o-yellow: #FFF100; --o-magenta: #EB0C6D; --o-blue: #00BFF3; --o-green: #50B048;
+}
+body.orig > header, body.orig > #hud, body.orig > #boardWrap, body.orig > footer, body.orig > .stage, body.orig > .vignette { visibility: hidden; }
+body.orig #modebar { display: none; }
+body.orig.menu-open #modebar { display: flex; z-index: 60; }
+body.orig .overlay:not(.o-keep) { display: none; }
+
+#ostage-wrap { position: fixed; inset: 0; z-index: 25; background: #000; overflow: hidden; display: none; }
+body.orig #ostage-wrap { display: block; }
+/* the area outside the 16:9 stage continues the screen's background (dots, or the crowd in games) */
+#ostage-wrap { background: #050505; }
+#ostage-wrap.crowd { background: #000; }
+#ostage-wrap.crowd::before { content: ""; position: absolute; inset: 0; background: url('/ui/crowd_lit_center') center 40% / cover; filter: brightness(.35) saturate(1.4) hue-rotate(200deg); }
+#ostage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: 50% 50%; overflow: visible;
+  background: transparent; font-family: var(--o-avenir); color: #fff; user-select: none; }
+
+/* ---- shared pieces ---- */
+.o-dots { position: absolute; inset: -3000px; background: radial-gradient(#ffffff2e 1.7px, transparent 2.3px) 0 0 / 9px 9px; }
+.o-crowd { position: absolute; inset: -600px -1200px; overflow: hidden; }
+.o-crowd .ph { position: absolute; inset: -2% -2% 0; background: url('/ui/crowd_lit_center') center 30% / cover; filter: brightness(.55) contrast(1.15); }
+.o-crowd .tint { position: absolute; inset: 0; mix-blend-mode: color;
+  background: linear-gradient(100deg, #1f9a4a 0%, #2a7bd8 28%, #8a3fd8 55%, #d23aa0 75%, #2fb0e0 100%);
+  animation: o-hue 18s linear infinite; }
+.o-crowd .lights { position: absolute; inset: 0; mix-blend-mode: screen; opacity: .45;
+  background: radial-gradient(40% 35% at 18% 55%, #29d36b55, transparent 70%), radial-gradient(45% 40% at 82% 50%, #3aa8ff55, transparent 70%),
+              radial-gradient(35% 30% at 52% 40%, #c04ae055, transparent 70%); animation: o-sway 7s ease-in-out infinite alternate; }
+.o-crowd .shade { position: absolute; inset: 0; background: linear-gradient(#000 0%, #000a 18%, #0004 45%, #000a 85%, #000 100%); }
+@keyframes o-hue { to { filter: hue-rotate(360deg); } }
+@keyframes o-sway { to { transform: translateX(4%); } }
+
+.o-icon { position: absolute; width: 72px; height: 72px; border-radius: 50%; background: #fff; display: grid; place-items: center; cursor: pointer; }
+.o-icon img { width: 54px; height: 54px; filter: brightness(0); }
+.o-icon.dim { opacity: .35; }
+
+/* round pips (sys_pip_*) */
+.o-pips { position: absolute; left: 189px; top: 45px; display: flex; gap: 24px; }
+.o-pips i { width: 54px; height: 66px; background: center / contain no-repeat; }
+.o-pips .pending { background-image: url('/ui/sys_pip_regular_upcoming'); }
+.o-pips .met, .o-pips .skipped { background-image: url('/ui/sys_pip_regular_met'); }
+.o-pips .perfect { background-image: url('/ui/sys_pip_regular_perfect'); }
+.o-pips .failed { background-image: url('/ui/sys_pip_regular_missed'); }
+.o-pips .bonus { background-image: url('/ui/sys_pip_regular_upcoming'); opacity: .4; }
+.o-pips .bonus.live { opacity: 1; }
+
+/* the slot strip: 5 squares along the bottom edge, VU bars above filled ones */
+.o-slots { position: absolute; left: 63px; width: 1794px; display: flex; justify-content: space-between; transition: top .6s cubic-bezier(.2,.8,.2,1); }
+.o-slot { position: relative; width: 333px; height: 333px; }
+.o-slot .frame { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); filter: drop-shadow(0 0 10px var(--g1)) drop-shadow(0 0 10px var(--g2)); }
+.o-slot .art { position: absolute; inset: 0; border-radius: 10px; overflow: hidden; background: #000; }
+.o-slot .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.o-slot img { -webkit-user-drag: none; user-select: none; }
+.o-slot .vu { position: absolute; left: 15px; right: 15px; bottom: 100%; height: 172px; margin-bottom: 8px; display: flex; gap: 9px; }
+.o-slot .vu i { flex: 1; background: #ffffff1a; }
+.o-slot .vu { filter: drop-shadow(0 0 calc(var(--bloom, .5) * 26px) var(--c)); }
+.o-slot .vu i.on { background: linear-gradient(to top, var(--c) calc(var(--f, 1) * 100%), #ffffff1a calc(var(--f, 1) * 100%)); }
+.o-slot .vu i:nth-child(1) { clip-path: polygon(0 55%, 100% 37%, 100% 100%, 0 100%); }
+.o-slot .vu i:nth-child(2) { clip-path: polygon(0 37%, 100% 18%, 100% 100%, 0 100%); }
+.o-slot .vu i:nth-child(3) { clip-path: polygon(0 18%, 100% 0, 100% 100%, 0 100%); }
+.o-slot .lbl { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; font-weight: 800; font-size: 64px; letter-spacing: .06em; }
+.o-slot .lbl small { display: block; font-size: 30px; letter-spacing: .14em; font-weight: 600; margin-top: 6px; }
+.o-slot.player .frame { filter: drop-shadow(0 0 10px #fff); }
+
+/* top bar of menu screens */
+.o-topbar { position: absolute; left: -3000px; right: -3000px; top: 0; height: 120px; background: #141414; display: flex; align-items: center; justify-content: center;
+  font-size: 54px; font-weight: 400; letter-spacing: .2em; }
+.o-topbar .l, .o-topbar .r { position: absolute; top: 0; height: 120px; display: flex; align-items: center; gap: 70px; }
+.o-topbar .l { left: 3070px; } .o-topbar .r { right: 3080px; }
+.o-topbar img { height: 54px; cursor: pointer; }
+.o-bottombar { position: absolute; left: -3000px; right: -3000px; padding: 0 3000px; bottom: 0; height: 123px; background: #141414e8; border-top: 1px solid #ffffff14;
+  display: grid; grid-template-columns: 1fr 120px 1fr; align-items: center; font-size: 54px; letter-spacing: .14em; }
+.o-bottombar > :first-child { text-align: center; } .o-bottombar > :last-child { text-align: center; }
+.o-bottombar .chev { width: 72px; height: 72px; border-radius: 50%; background: #fff; display: grid; place-items: center; justify-self: center; color: #000; font-size: 40px; font-weight: 900; }
+.o-click { cursor: pointer; }
+
+.o-heavy { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.o-dmpill { display: inline-block; vertical-align: middle; height: 1.1em; width: 3.3em; border-radius: 99px; background: url('/ui/sys_dropmix_button') center / 112% auto no-repeat; margin: 0 .3em; position: relative; top: -.08em; }
+
+/* full-screen text moments */
+.o-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
+.o-fade { animation: o-fadein .35s ease-out both; }
+@keyframes o-fadein { from { opacity: 0; transform: scale(.97); } }
+.o-wipe { color: #8a8a8a; background: linear-gradient(0deg, #fff 0 50%, #8a8a8a 50% 100%) 0 0 / 100% 200%; -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; animation: o-wipe 1.6s ease-out forwards; }
+@keyframes o-wipe { from { background-position: 0 0; } to { background-position: 0 100%; } }
+
+#c-base .o-slots .o-slot:nth-child(3) .frame { display: none; }   /* Clash setup: the VS replaces the middle slot */

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMix</title>
+<link rel="stylesheet" href="/dm.css">
+<link rel="stylesheet" href="/orig.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body { display: grid; grid-template-rows: auto auto 1fr auto; }
+  .stage { position: fixed; inset: 0; z-index: -2; opacity: 1; background-size: cover; background-position: center 85%; filter: brightness(1.6) contrast(1.1); transition: background-image .4s; }
+  .vignette { position: fixed; inset: 0; z-index: -1; background: radial-gradient(ellipse at 50% 30%, #0006 20%, #000d 70%), linear-gradient(#000 0%, #0000 40%); }
+
+  header { display: flex; align-items: center; gap: 2vw; padding: 2.2vh 3vw 0; }
+  /* the logo texture is a square with the wordmark in a centred strip -> crop to the strip */
+  header .logo { height: 9vh; width: 36vh; object-fit: cover; object-position: center; }
+  #modeTitle { margin-left: auto; text-align: right; }
+  #modeTitle .name { font-size: 3.2vh; }
+  #modeTitle .sub { font-size: 2vh; color: var(--dim); }
+  .join { display: flex; align-items: center; gap: 1.2vw; background: #000c; border-radius: 1.4vh; padding: 1vh 1.2vw; }
+  .join canvas, .join img { width: 11vh; height: 11vh; image-rendering: pixelated; background: #fff; border-radius: .6vh; padding: .5vh; }
+  .join .t1 { font-size: 1.7vh; color: var(--dim); text-transform: uppercase; letter-spacing: .12em; font-weight: 800; }
+  .join .t2 { font-size: 2.3vh; font-weight: 700; }
+
+  #hud { display: flex; justify-content: center; align-items: center; gap: 3vw; min-height: 9vh; padding: 1vh 3vw; }
+
+  #boardWrap { position: relative; margin: 1vh 4vw 0; }
+  /* the DropMix button on the board's edge */
+  #dmButton { position: absolute; right: -1.6vw; top: 50%; transform: translate(50%, -50%); width: 8vh; height: 8vh; border-radius: 50%;
+    background: #0d0d0f url('/ui/sys_dropmix_button') center / 70% no-repeat; box-shadow: 0 0 0 .4vh #1d1d20, 0 0 0 .7vh #000, 0 .8vh 2vh #000; }
+  #dmButton.armed { box-shadow: 0 0 0 .4vh #fff, 0 0 3vh .6vh #fffa; }
+  #dmButton:active { transform: translate(50%, -50%) scale(.94); }
+  #slots { display: none; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 1.3vh; min-width: 0; }
+  .col .slot { width: 100%; }
+  .col .slot .badge-n { font-size: 1.6vh; top: -1.2vh; }
+  .info { width: 100%; text-align: center; min-height: 11vh; }
+  .info .song { font-weight: 800; font-size: 2.5vh; line-height: 1.12; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .info .artist { font-size: 1.9vh; color: #cfcfd8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .info .row { display: flex; justify-content: center; align-items: center; gap: .8vw; margin-top: .8vh; font-size: 1.6vh; color: var(--dim); }
+  .info .row img { height: 2.4vh; }
+  .chip { padding: .2vh .8vw; border-radius: 99px; font-weight: 800; font-size: 1.5vh; text-transform: uppercase; letter-spacing: .06em; color: #000; background: var(--c); }
+  .col.empty .info .song { color: #555; }
+
+  footer { display: flex; align-items: center; gap: 1vw; padding: 1.5vh 30vw 2.5vh 3vw; flex-wrap: wrap; }
+  footer .lbl { color: var(--dim); font-size: 1.5vh; text-transform: uppercase; letter-spacing: .12em; font-weight: 800; margin-right: .5vw; }
+  .player { display: flex; align-items: center; gap: .6vw; background: #000b; border: 1px solid var(--line); border-radius: 99px; padding: .6vh 1.1vw; font-size: 1.9vh; }
+  .player .hc { color: var(--dim); font-size: 1.6vh; }
+  .player.turn { border-color: #fff; box-shadow: 0 0 1.6vh #fff6; }
+  .player .kick { display: grid; place-items: center; width: 2.4vh; height: 2.4vh; margin-left: .2vw; padding: 0; border: 0; border-radius: 50%; background: #ffffff1a; color: var(--dim); font: 700 1.9vh/1 "Segoe UI", sans-serif; cursor: pointer; }
+  .player .kick:hover { background: var(--bad, #e8453c); color: #fff; }
+  #tempo { margin-left: auto; color: var(--dim); font-size: 1.8vh; }
+  #tempo b { color: #fff; }
+  #empty { text-align: center; color: var(--dim); font-size: 2.2vh; }
+</style>
+<script>
+  // OpenMix host token: given to this window in its URL (#t=...), sent only with this page's own API requests
+  (() => {
+    const m = /[#&]t=([0-9A-F]+)/i.exec(location.hash || '');
+    try { if (m) { sessionStorage.setItem('om-token', m[1]); history.replaceState(null, '', location.pathname + location.search); } } catch { }
+    let t = null; try { t = sessionStorage.getItem('om-token'); } catch { }
+    if (!t) return;
+    const f = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.startsWith('/api/') || url.startsWith(location.origin + '/api/')) {
+        init = Object.assign({}, init); const h = new Headers(init.headers || {}); h.set('X-OpenMix-Token', t); init.headers = h;
+      }
+      return f(input, init);
+    };
+  })();
+</script>
+</head>
+<body>
+<div class="stage" id="stage"></div><div class="vignette"></div>
+
+<header>
+  <img class="logo" src="/ui/logo_dropmix_no_tm" alt="DropMix">
+  <div id="modeTitle"><div class="name heavy">Freestyle</div><div class="sub">Drop cards from your phone</div></div>
+  <div class="join"><div id="qr"></div><div><div class="t1">Join on your phone</div><div class="t2" id="joinUrl">…</div></div></div>
+</header>
+
+<div id="hud"></div>
+<div id="boardWrap"><div id="board"></div><button id="dmButton" title="DropMix button"></button></div>
+<div id="slots"></div>
+
+<footer><span class="lbl">Players</span><span id="players"></span><span id="tempo"></span></footer>
+
+<script src="/vendor/qrcode.js"></script>
+<script src="/board.js"></script>
+<script src="/orig.js"></script>
+<script src="/mixgrid.js"></script>
+<script src="/table-modes.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let state = null;
+
+async function loadInfo() {
+  try {
+    const info = await (await fetch('/api/info')).json();
+    const url = info.joinUrls[0] || location.origin + '/';
+    $('#joinUrl').textContent = url.replace(/^http:\/\//, '').replace(/\/$/, '');
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+    $('#qr').innerHTML = qr.createImgTag(6, 0);
+  } catch {}
+}
+
+function powerImg(p) { return p ? `<img src="/ui/sys_power_${Math.max(1, Math.min(3, p))}" alt="power ${p}">` : ''; }
+
+function render() {
+  const s = state; if (!s) return;
+  const lanes = s.mode?.id === 'lanes' && s.mode.lanes && !['lobby', 'over'].includes(s.mode.phase) ? s.mode.lanes : null;
+  window.renderBoard($('#board'), s, { size: 'table', above: lanes ? (i => window.renderLane(lanes[i], i)) : null });
+  $('#dmButton').classList.toggle('armed', !!s.mode?.buttonArmed);
+  $('#slots').innerHTML = s.pads.map(p => {
+    const c = p.top;
+    const src = !c ? '' : p.source === 'Board' ? 'on the board' : (p.playedBy ? esc(p.playedBy) : '');
+    return `<div class="col${c ? '' : ' empty'}">
+      <div class="slot s${p.pad}${c ? ' filled' : ''}">
+        <span class="badge-n">${p.pad + 1}</span>
+        <img class="frame" src="/ui/shell_slot_0${p.pad}" alt="">
+        ${c ? `<div class="art"><img src="/art/${encodeURIComponent(c.image)}" alt=""></div>` : ''}
+      </div>
+      <div class="info">
+        <div class="song">${c ? esc(c.name) : 'Empty'}</div>
+        <div class="artist">${c ? esc(c.artist) : '&nbsp;'}</div>
+        ${c ? `<div class="row"><span class="chip c-${c.type}">${esc(c.type)}</span>${powerImg(c.power)}<span>${src}</span></div>` : ''}
+      </div></div>`;
+  }).join('');
+
+  const teamOf = p => p.team && p.team !== 'None' ? ` t-${p.team.toLowerCase()}` : '';
+  $('#players').innerHTML = s.players.length
+    ? s.players.map(p => `<span class="player${teamOf(p)}${s.mode?.current && p.team === s.mode.current && s.mode.phase === 'play' ? ' turn' : ''}" style="${teamOf(p) ? 'border-color:var(--team)' : ''}"><span class="dot${p.status === 'Orphaned' ? ' off' : ''}"></span>${esc(p.name)}<span class="hc">${p.handCount}</span><button class="kick" data-kick="${esc(p.name)}" title="Remove ${esc(p.name)}" aria-label="Remove ${esc(p.name)}">×</button></span>`).join('')
+    : '';
+  document.querySelector('footer .lbl').style.visibility = s.players.length ? '' : 'hidden';   // the QR code already says how to join
+  // host-only: tap the × on a player to remove them (the token goes with the request automatically)
+  $('#players').onclick = e => {
+    const b = e.target.closest('[data-kick]'); if (!b) return;
+    const name = b.dataset.kick;
+    if (confirm('Remove ' + name + ' from the table?'))
+      fetch('/api/kick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  };
+
+  const playing = s.pads.map(p => p.top).filter(Boolean);
+  const lead = playing[0];
+  const keyName = k => ({ Cs: 'C#', Ds: 'E♭', Fs: 'F#', Gs: 'A♭', As: 'B♭' }[k] || k);
+  const keyed = playing.find(c => c.key && c.key !== 'None');
+  const mx = s.mix;
+  if (mx && mx.bar >= 0) $('#tempo').innerHTML = `Mix <b class="num">${Math.round(mx.tempo)} BPM</b>${mx.key ? ` · <b>${esc(mx.key)} ${mx.minor ? 'minor' : 'major'}</b>` : ''}${mx.transitioning ? ' · <b>transition</b>' : ''}`;
+  else $('#tempo').innerHTML = lead ? `Mix <b class="num">${Math.round(lead.bpm)} BPM</b>${keyed ? ` · <b>${keyName(keyed.key)} ${esc(keyed.mode).toLowerCase()}</b>` : ''}` : '';
+
+  if (window.renderMode) window.renderMode(s); else $('#hud').innerHTML = '';
+}
+
+function watch() {
+  const es = new EventSource('/api/watch');
+  es.addEventListener('state', ev => { state = JSON.parse(ev.data); render(); });
+}
+$('#dmButton').onclick = () => fetch('/api/button', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+loadInfo(); watch();
+</script>
+</body>
+</html>
