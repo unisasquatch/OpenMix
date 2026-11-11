@@ -51,6 +51,18 @@ public sealed class MixDirector
 
     // ------------------------------------------------------------------ cards
 
+    /// <summary>The folder a card's audio is loaded from. Canonically audio_unpacked/&lt;id&gt;/&lt;id&gt;/, but tolerate a flat
+    /// audio_unpacked/&lt;id&gt;/ too; prefer whichever actually holds a .midisong and non-empty samples/.</summary>
+    static string PickAudioDir(string audioDir, string audioId)
+    {
+        string nested = Path.Combine(audioDir, audioId, audioId), flat = Path.Combine(audioDir, audioId);
+        if (string.IsNullOrEmpty(audioId)) return nested;
+        static bool Playable(string d) => Directory.Exists(d) && Directory.EnumerateFiles(d, "*.midisong").Any()
+            && Directory.Exists(Path.Combine(d, "samples")) && Directory.EnumerateFiles(Path.Combine(d, "samples")).Any();
+        static bool HasSong(string d) => Directory.Exists(d) && Directory.EnumerateFiles(d, "*.midisong").Any();
+        return Playable(nested) ? nested : Playable(flat) ? flat : HasSong(nested) ? nested : HasSong(flat) ? flat : nested;
+    }
+
     public void OnSlot(int pad, Card? card, string? part) => OnSlot(pad, card, new[] { part }, false);
 
     /// <param name="parts">the arrangement(s) this card plays here — two for a Wild in a two-colour slot</param>
@@ -74,8 +86,12 @@ public sealed class MixDirector
             bool othersKeyed = _slots.Where((c, i) => i != pad && c != null).Any(c => Keyed(c!, null));
             _slots[pad] = card; _slotBeat[pad] = parts.Contains("beat");
 
-            string dir = Path.Combine(_audioDir, card.AudioId, card.AudioId);
-            bool hasAudio = !string.IsNullOrEmpty(card.AudioId) && Directory.Exists(dir);
+            // A card's audio normally lives at audio_unpacked/<id>/<id>/ (the archive paths are prefixed with the id).
+            // Be tolerant of a flat audio_unpacked/<id>/ layout too, and prefer whichever actually has a .midisong and
+            // non-empty samples/ so a card still plays when content was laid out either way.
+            string dir = PickAudioDir(_audioDir, card.AudioId);
+            bool hasAudio = !string.IsNullOrEmpty(card.AudioId) && Directory.Exists(dir)
+                && Directory.EnumerateFiles(dir, "*.midisong").Any();
             bool gate = !StudioOpen && !PinMaster;
             bool keyed = Keyed(card, part);
 

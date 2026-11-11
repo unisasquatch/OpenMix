@@ -18,6 +18,10 @@ body.orig #ostage-wrap { display: block; }
 #ostage-wrap.crowd::before { content: ""; position: absolute; inset: 0; background: url('/ui/crowd_lit_center') center 40% / cover; filter: brightness(.35) saturate(1.4) hue-rotate(200deg); }
 #ostage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: 50% 50%; overflow: visible;
   background: transparent; font-family: var(--o-avenir); color: #fff; user-select: none; }
+/* "wide" menu screens stretch the stage to the full viewport width (ultrawide). Edge-anchored lists (collection grid,
+   mixes) fill it; the fixed-width settings list is centred so it isn't stuck against the left. */
+#ostage.wide .st-list { left: 50%; margin-left: -717px; }
+#ostage.wide .mx-list { left: 50%; right: auto; width: 1640px; margin-left: -820px; }
 
 /* ---- shared pieces ---- */
 .o-dots { position: absolute; inset: -3000px; background: radial-gradient(#ffffff2e 1.7px, transparent 2.3px) 0 0 / 9px 9px; }

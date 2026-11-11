@@ -132,6 +132,7 @@ public sealed class ClashMode : GameMode
     public override void Start()
     {
         S = new State();
+        T.ClearBoardPlayers();
         foreach (var l in _lobbyCards) l.Clear();
         ChooseIcon(Side.Red); ChooseIcon(Side.Blue);
         _events.Clear(); _plays.Clear();
@@ -602,8 +603,14 @@ public sealed class ClashMode : GameMode
         if (S.Phase == Phase.Lobby)
         {
             _lobbyCards[pad].Add(card);
-            if (SideOfSlot(pad) is Side sd and not Side.None && PlayerIds.Contains(card.Icon) && S.Icon.GetValueOrDefault(sd) != card.Icon
-                && S.Icon.GetValueOrDefault(Rules.Other(sd)) != card.Icon) ChooseIcon(sd);
+            if (SideOfSlot(pad) is Side sd and not Side.None)
+            {
+                // the deck chooses that team's icon ("ADD YOUR DECK TO JOIN") ...
+                if (PlayerIds.Contains(card.Icon) && S.Icon.GetValueOrDefault(sd) != card.Icon
+                    && S.Icon.GetValueOrDefault(Rules.Other(sd)) != card.Icon) ChooseIcon(sd);
+                // ... and seats a board player on that side if it has none yet (1v1 from the board alone; phones add more)
+                if (!T.Players.Any(p => p.IsBoard && p.Team == sd)) T.SeatBoardPlayer(pad, sd);
+            }
             return;
         }
         if (S.Phase != Phase.Play) { T.Pads[pad].Add(new PadCard { Card = card, Source = CardSource.Board, Valid = false }); return; }
@@ -623,7 +630,15 @@ public sealed class ClashMode : GameMode
 
     public override void BoardLifted(Card card, int pad)
     {
-        if (S.Phase == Phase.Lobby) { int li = _lobbyCards[pad].FindLastIndex(c => c.Cid == card.Cid); if (li >= 0) _lobbyCards[pad].RemoveAt(li); return; }
+        if (S.Phase == Phase.Lobby)
+        {
+            int li = _lobbyCards[pad].FindLastIndex(c => c.Cid == card.Cid); if (li >= 0) _lobbyCards[pad].RemoveAt(li);
+            // lifting a team's last deck withdraws that side's board player, so they can change teams (place on the other side)
+            if (SideOfSlot(pad) is Side sd and not Side.None
+                && Enumerable.Range(0, Rules.Slots).Where(i => SideOfSlot(i) == sd).All(i => _lobbyCards[i].Count == 0))
+                T.UnseatBoardTeam(sd);
+            return;
+        }
         var s = T.Pads[pad];
         int i = s.FindLastIndex(pc => pc.Source == CardSource.Board && pc.Card.Cid == card.Cid);
         if (i < 0) return;

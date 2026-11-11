@@ -26,6 +26,7 @@ public sealed class MixGridMode : GameMode
     public override string Title => "MixGrid";
 
     public const int W = 7, H = 7, HandSize = 2, DeckSize = 30, MinPath = 1, NumPlaylists = 2;
+    const double MoveTime = 7;   // seconds to drop a card before you lose (resets on each drop)
     static readonly TimeSpan RevealTime = TimeSpan.FromSeconds(2.5), GoalDoneTime = TimeSpan.FromSeconds(5), ReshuffleTime = TimeSpan.FromSeconds(0.5);
 
     static readonly string[] RandomTypes = { "Level1", "Level2", "Level3", "Beat", "Lead", "Loop", "Bass", "Synth", "Guitar", "Vocal", "Drums" };
@@ -175,7 +176,9 @@ public sealed class MixGridMode : GameMode
     readonly Dictionary<string, int> _cleared = new(); int _targetsCleared;
     long _reqId, _cardId, _evId;
     (long id, string? text) _notice;
-    object? _lastPlay;   // {id, cells:[[x,y]], pts:[..], mult, total}
+    object? _lastPlay;   // last drop: {id, pad, cells:[[x,y]], cleared, mult, total}
+    double _moveLeft;    // the 7-second drop timer
+    bool _mixBonusDone;  // the complete-mix bonus fires once per game
     DateTime _lastTick = DateTime.UtcNow;
 
     public MixGridMode() { for (int x = 0; x < W; x++) for (int y = 0; y < H; y++) _grid[x, y] = new Cell(); }
@@ -207,7 +210,7 @@ public sealed class MixGridMode : GameMode
     public override void Start()
     {
         _phase = Phase.Levels; _phaseAt = DateTime.UtcNow;
-        ClearGrid(); _hand.Clear(); _deck.Clear(); SyncPads();
+        ClearGrid(); _hand.Clear(); _deck.Clear(); foreach (var pad in T.Pads) pad.Clear();
     }
 
     public override void DecksChanged() { var l = Playlists(); _playlists = _playlists.Where(l.Contains).ToArray(); }
@@ -219,10 +222,16 @@ public sealed class MixGridMode : GameMode
         return on.Count >= NumPlaylists ? on : all;
     }
 
-    // physical board is off in MixGrid (CardSlots.readerMode = 0)
-    public override void BoardPlaced(Card card, int pad) { }
+    // Drop a physical card onto a pad whose colour rule accepts it; it clears the matching grid requests. Cards stack
+    // (overlap), so a lift doesn't remove it — the mix keeps building.
+    public override bool AcceptsBoardCards => _phase == Phase.Play;
+    public override void BoardPlaced(Card card, int pad)
+    {
+        if (_phase != Phase.Play || !Rules.IsTypeValidInSlot(card.Type, pad)) return;
+        DropCard(card, pad, fromHand: false);
+    }
     public override void BoardLifted(Card card, int pad) { }
-    public override ActionResult Play(Player p, Card card, int pad) => ActionResult.Fail("In MixGrid, draw a path on the grid.");
+    public override ActionResult Play(Player p, Card card, int pad) => ActionResult.Fail("In MixGrid, drop a card on a matching pad.");
 
     // ======================================================================================
     // actions (phones and the table screen)
@@ -264,7 +273,7 @@ public sealed class MixGridMode : GameMode
                 _phase = Phase.Levels; return ActionResult.Success;
             case "levels": case "lobby":
                 if (_phase is Phase.Play or Phase.Reveal or Phase.GoalDone) EndLevel();
-                _phase = Phase.Levels; ClearGrid(); _hand.Clear(); SyncPads(); return ActionResult.Success;
+                _phase = Phase.Levels; ClearGrid(); _hand.Clear(); foreach (var pad in T.Pads) pad.Clear(); return ActionResult.Success;
             case "finish":
                 if (_phase != Phase.Play) return ActionResult.Fail("Not now.");
                 if (_hand.Count > 0) return ActionResult.Fail("You still have cards to play.");
@@ -273,9 +282,9 @@ public sealed class MixGridMode : GameMode
                 if (_phase != Phase.Play) return ActionResult.Fail("Not now.");
                 if (_hand.Count < 2) return ActionResult.Fail("Only one card left.");
                 (_hand[0], _hand[1]) = (_hand[1], _hand[0]); return ActionResult.Success;
-            case "play":
+            case "drop":   // arg = "cid|pad": drop a hand card onto a pad, clearing every grid request it matches
                 if (_phase != Phase.Play) return ActionResult.Fail(_phase == Phase.Levels ? "Pick a level and start." : "Wait a moment…");
-                return PlayPath(arg ?? "");
+                return PlayDrop(arg ?? "");
         }
         return ActionResult.Fail("Unknown action.");
     }
@@ -292,7 +301,7 @@ public sealed class MixGridMode : GameMode
         while (chosen.Count < NumPlaylists && lists.Count > chosen.Count) { var pick = lists[T.Rng.Next(lists.Count)]; if (!chosen.Contains(pick)) chosen.Add(pick); }
         _playlists = chosen.ToArray();
         _score = 0; _encorePoints = 0; _lastBonus = 0; _round = 0; _encore = false; _starsNow = 0; _passed = false; _newBest = false;
-        _cleared.Clear(); _targetsCleared = 0; _lastPlay = null;
+        _cleared.Clear(); _targetsCleared = 0; _lastPlay = null; _mixBonusDone = false;
         foreach (var pad in T.Pads) pad.Clear();
         ClearGrid();
         BuildDeck();
@@ -303,7 +312,7 @@ public sealed class MixGridMode : GameMode
     }
 
     public override void Resumed(TimeSpan d) { _lastTick += d; _phaseAt += d; }
-    void SetPhase(Phase p) { _phase = p; _phaseAt = DateTime.UtcNow; }
+    void SetPhase(Phase p) { _phase = p; _phaseAt = DateTime.UtcNow; if (p == Phase.Play) _moveLeft = MoveTime; }
 
     public override bool Tick(DateTime now)
     {
@@ -326,6 +335,10 @@ public sealed class MixGridMode : GameMode
                 _encoreLeft -= dt;
                 if (_encoreLeft <= 0) { _encoreLeft = 0; Notice($"Encore complete: +{_encorePoints:N0}"); EndLevel(); }
                 return true;
+            case Phase.Play:   // the 7-second drop timer: run out and you lose
+                _moveLeft -= dt;
+                if (_moveLeft <= 0) { _moveLeft = 0; Notice("OUT OF TIME!"); T.EmitMusic("sfx:request_failure"); EndLevel(); return true; }
+                return false;
         }
         return false;
     }
@@ -343,13 +356,7 @@ public sealed class MixGridMode : GameMode
             T.EmitMusic("sfx:request_success"); T.EmitMusic("party_round");
             SetPhase(Phase.GoalDone); return;
         }
-        for (int tries = 0; tries < 8; tries++)
-        {
-            if (AnyMove()) return;
-            if (_hand.Count == 0) { EndLevel(); return; }
-            Reshuffle();
-        }
-        if (!AnyMove()) EndLevel();
+        if (_hand.Count == 0 && _deck.Count == 0) EndLevel();   // out of cards: nothing left to drop
     }
 
     void EndLevel()
@@ -383,9 +390,6 @@ public sealed class MixGridMode : GameMode
     void BuildRound(bool keepCards)
     {
         var rd = _lv!.Rounds[_round];
-        var carried = new List<(int x, int y, GridCard c)>();
-        if (keepCards)
-            for (int x = 0; x < W; x++) for (int y = 0; y < H; y++) if (_grid[x, y].Card is { } gc) carried.Add((x, y, gc));
         ClearGrid();
         for (int x = 0; x < W; x++) for (int y = 0; y < H; y++)
         {
@@ -400,20 +404,7 @@ public sealed class MixGridMode : GameMode
                 cell.Req = NewReq(rd.Fixed[x, y] ?? RandomType(), pinned: !falling, target: (cell.Prop & Prop.Target) != 0);
             }
         }
-        foreach (var (x, y, c) in carried)
-        {
-            var cell = _grid[x, y];
-            if (cell.Exists && cell.Req == null && cell.Card == null && (cell.Prop & Prop.Immovable) == 0) { cell.Card = c; continue; }
-            bool placed = false;
-            for (int yy = 0; yy < H && !placed; yy++)
-            {
-                var d = _grid[x, yy];
-                if (d.Exists && d.Req == null && d.Card == null && (d.Prop & Prop.Immovable) == 0) { d.Card = c; placed = true; }
-            }
-            if (!placed) { c.Slot = -1; T.Discard(c.Card); }
-        }
         Refill();
-        SyncPads();
         Notice($"ROUND {_round + 1}/{_lv.Rounds.Count} · {GoalText()}");
     }
 
@@ -591,87 +582,70 @@ public sealed class MixGridMode : GameMode
     // play a path
     // ======================================================================================
 
-    ActionResult PlayPath(string arg)
+    // A wall (immovable, not a target) can't be cleared; targets and ordinary requests can.
+    static bool IsWall(Cell c) => (c.Prop & Prop.Immovable) != 0 && (c.Prop & Prop.Target) == 0;
+
+    ActionResult PlayDrop(string arg)
     {
-        var pts = new List<(int x, int y)>();
-        foreach (var part in arg.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        var parts = arg.Split('|');
+        if (parts.Length != 2 || !int.TryParse(parts[1], out var pad) || pad < 0 || pad >= Rules.Slots)
+            return ActionResult.Fail("Drop a card on a pad.");
+        var card = _hand.FirstOrDefault(c => c.Cid.Equals(parts[0], StringComparison.OrdinalIgnoreCase));
+        if (card == null) return ActionResult.Fail("That card isn't in your hand.");
+        if (!Rules.IsTypeValidInSlot(card.Type, pad)) return ActionResult.Fail($"“{card.Name}” can’t go on that pad.");
+        DropCard(card, pad, fromHand: true);
+        return ActionResult.Success;
+    }
+
+    /// <summary>Place a card on a pad (cards stack / overlap) and clear every grid request it satisfies there — its
+    /// colour, its power, its instruments, wildcards — grid-wide. Score is cleared requests × the mix multiplier.</summary>
+    void DropCard(Card card, int pad, bool fromHand)
+    {
+        if (fromHand) _hand.Remove(card);
+        T.Pads[pad].Add(new PadCard { Card = card, Source = CardSource.Board });   // Board: never sent to the discard pile
+        var opts = Options(card).Where(o => o.Slot == pad).ToList();
+        int mult = Multiplier(true), total = 0, cleared = 0;
+        var cells = new List<int[]>();
+        for (int x = 0; x < W; x++) for (int y = 0; y < H; y++)
         {
-            var xy = part.Split(',');
-            if (xy.Length != 2 || !int.TryParse(xy[0], out var x) || !int.TryParse(xy[1], out var y) || !In(x, y)) return ActionResult.Fail("Bad path.");
-            pts.Add((x, y));
-        }
-        if (pts.Count == 0) return ActionResult.Fail("Draw a path through the requests.");
-
-        // a path that starts on a grid card moves that card
-        GridCard? moving = null; (int x, int y) origin = default;
-        if (_grid[pts[0].x, pts[0].y].Card is { } gc0) { moving = gc0; origin = pts[0]; pts.RemoveAt(0); }
-        var card = moving?.Card ?? (_hand.Count > 0 ? _hand[0] : null);
-        if (card == null) return ActionResult.Fail("No cards left.");
-
-        var opts = Options(card).ToList();
-        (int x, int y)? prev = moving != null ? origin : null;
-        var seen = new HashSet<(int, int)>();
-        foreach (var p in pts)
-        {
-            var c = _grid[p.x, p.y];
-            if (!c.Exists || c.Card != null || c.Req == null) return ActionResult.Fail("A path can only cross open requests.");
-            if (!seen.Add(p)) return ActionResult.Fail("A path can't cross itself.");
-            if (prev is { } pv)
-            {
-                if (!Adjacent(pv, p)) return ActionResult.Fail("Each step must touch the last one.");
-                if (!(moving != null && pv == origin) && (_grid[pv.x, pv.y].Prop & Prop.MustEnd) != 0) return ActionResult.Fail("That tile ends the path.");
-            }
-            opts = opts.Where(o => Satisfies(c.Req.Type, card, o)).ToList();
-            if (opts.Count == 0) return ActionResult.Fail($"“{card.Name}” can't meet {Prompt(c.Req.Type)}.");
-            prev = p;
-        }
-        while (pts.Count > 0 && (_grid[pts[^1].x, pts[^1].y].Prop & Prop.InvalidEnd) != 0) pts.RemoveAt(pts.Count - 1);
-        if (pts.Count < MinPath) return ActionResult.Fail("A path can't end on a wall.");
-
-        // pick the highest-priority slot option: empty slot 2, odd slot 1
-        var opt = opts.OrderByDescending(o => (T.Pads[o.Slot].Count == 0 ? 2 : 0) | (o.Slot % 2 == 1 ? 1 : 0)).ThenBy(o => o.Slot).First();
-
-        // the card enters the mix slot; a grid card that held that slot moves to a free valid slot
-        GridCard gcard = moving ?? new GridCard { Card = card, Id = NextId() };
-        if (moving == null) _hand.RemoveAt(0);
-        foreach (var other in AllGridCards().ToList())
-            if (other != gcard && other.Slot == opt.Slot)
-            {
-                var free = Enumerable.Range(0, Rules.Slots).FirstOrDefault(s => s != opt.Slot && !AllGridCards().Any(g => g.Slot == s) && Rules.IsTypeValidInSlot(other.Card.Type, s), -1);
-                other.Slot = free;
-            }
-        gcard.Slot = opt.Slot;
-        SyncPads(gcard);   // the played card isn't on the grid yet but already sounds (and counts for the multiplier)
-
-        // score
-        int mult = Multiplier(true), total = 0;
-        var perCell = new List<int>();
-        foreach (var p in pts)
-        {
-            var r = _grid[p.x, p.y].Req!;
-            int v = Points(r.Type) * mult; total += v; perCell.Add(v);
-            _cleared[r.Type] = _cleared.GetValueOrDefault(r.Type) + 1;
-            if (r.Target) _targetsCleared++;
-            _grid[p.x, p.y].Req = null;
+            var c = _grid[x, y];
+            if (!c.Exists || c.Req == null || IsWall(c) || !opts.Any(o => Satisfies(c.Req.Type, card, o))) continue;
+            int v = Points(c.Req.Type) * mult; total += v; cleared++;
+            _cleared[c.Req.Type] = _cleared.GetValueOrDefault(c.Req.Type) + 1;
+            if (c.Req.Target) _targetsCleared++;
+            cells.Add(new[] { x, y }); c.Req = null;
         }
         _score += total; if (_encore) _encorePoints += total;
-        _lastPlay = new { id = NextId(), cells = pts.Select(p => new[] { p.x, p.y }).ToArray(), pts = perCell, mult, total, card = card.Name };
-
-        // place the card on the last cell (absorbed on an absorbant tile)
-        if (moving != null) _grid[origin.x, origin.y].Card = null;
-        var end = _grid[pts[^1].x, pts[^1].y];
-        if ((end.Prop & Prop.Absorbant) != 0) { gcard.Slot = -1; T.Discard(card); }
-        else end.Card = gcard;
-        // burnDown tiles drop their cards
-        for (int x = 0; x < W; x++) for (int y = 0; y < H; y++)
-            if ((_grid[x, y].Prop & Prop.BurnDown) != 0 && _grid[x, y].Card is { } b) { b.Slot = -1; _grid[x, y].Card = null; }
+        _lastPlay = new { id = NextId(), pad, card = card.Name, cleared, total, mult, cells = cells.ToArray() };
         Refill();
-        SyncPads();
-        if (moving == null) DrawHand();
-
-        T.EmitMusic(pts.Count >= 3 ? "sfx:blockclear" : "sfx:request_success");
+        if (fromHand) DrawHand();
+        _moveLeft = MoveTime;
+        T.EmitMusic(cleared >= 3 ? "sfx:blockclear" : "sfx:request_success");
+        CompleteMixBonus();
         CheckFlow();
-        return ActionResult.Success;
+    }
+
+    /// <summary>The first time all five pads are filled this game (a complete mix), clear a random request type for
+    /// bonus points. One-time per game; the mix stays up (so the ×8 multiplier continues).</summary>
+    void CompleteMixBonus()
+    {
+        if (_mixBonusDone || Enumerable.Range(0, Rules.Slots).Any(s => T.Pads[s].Count == 0)) return;
+        _mixBonusDone = true;
+        var pool = new List<string>();
+        for (int x = 0; x < W; x++) for (int y = 0; y < H; y++) { var c = _grid[x, y]; if (c.Exists && c.Req != null && !IsWall(c)) pool.Add(c.Req.Type); }
+        if (pool.Count == 0) return;
+        string pick = pool[T.Rng.Next(pool.Count)];
+        int bonus = 0, n = 0;
+        for (int x = 0; x < W; x++) for (int y = 0; y < H; y++)
+        {
+            var c = _grid[x, y];
+            if (c.Exists && c.Req != null && c.Req.Type == pick && !IsWall(c))
+            { bonus += Points(pick) * 8; n++; _cleared[pick] = _cleared.GetValueOrDefault(pick) + 1; if (c.Req.Target) _targetsCleared++; c.Req = null; }
+        }
+        _score += bonus; if (_encore) _encorePoints += bonus;
+        Notice($"COMPLETE MIX! {n} {Prompt(pick)} cleared · +{bonus:N0}");
+        T.EmitMusic("sfx:request_success3x");
+        Refill();
     }
 
     IEnumerable<GridCard> AllGridCards()
@@ -831,8 +805,11 @@ public sealed class MixGridMode : GameMode
                 _ => _lv == null ? "" : DisplayName(_lv.Name),
             },
             phase = _phase switch { Phase.Levels => "lobby", Phase.Reveal => "reveal", Phase.GoalDone => "goal", Phase.Over => "over", _ => "play" },
-            canPlay = false, waitText = "Draw a path on the grid", allowDraw = false, allowClear = false, allowUndo = false,
+            canPlay = false, waitText = "Drop a card on a matching pad", allowDraw = false, allowClear = false, allowUndo = false,
             slots = SlotViews(),
+            padAccepts = Enumerable.Range(0, Rules.Slots).Select(s => Rules.SlotAccepts[s].Select(t => t.ToString()).ToArray()).ToArray(),
+            pads = Enumerable.Range(0, Rules.Slots).Select(s => new { accepts = Rules.SlotAccepts[s].Select(t => t.ToString()).ToArray(), image = T.Pads[s].Count > 0 ? T.Pads[s][^1].Card.ImageName : null, stack = T.Pads[s].Count }).ToArray(),
+            moveLeft = _phase == Phase.Play && !_encore ? _moveLeft : (double?)null, moveMax = MoveTime,
             levels = lobby ? _levelFiles.Select((f, i) =>
             {
                 var l = _levels[f]; var p = Prog(f);

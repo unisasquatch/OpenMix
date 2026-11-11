@@ -89,8 +89,8 @@
   const mb = n => (n / 1048576).toFixed(0) + ' MB';
   let st = {};
   function adbNote(s) {
-    if (s.adbInstalling) return 'Downloading Android platform-tools from Google (~15 MB)…';
-    if (!s.adb) return "adb isn't installed. Click “Install adb” to download Google's Android platform-tools (~15 MB), or just choose the files below instead.";
+    if (s.adbInstalling) return 'Downloading Android platform-tools from Google (~7 MB)…';
+    if (!s.adb) return "adb isn't installed — it's an optional part of the OpenMix installer (re-run it and tick “Android platform-tools”). You can also download it now, or just choose the files below instead.";
     switch (s.phone) {
       case 'ready': return 'Phone detected — ready to copy.';
       case 'unauthorized': return 'Phone found. On the phone, tap “Allow” (or “Always allow”) on the USB-debugging prompt, then try again.';

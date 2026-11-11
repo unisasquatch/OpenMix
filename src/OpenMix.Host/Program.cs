@@ -45,6 +45,12 @@ string audioDir = Path.Combine(root, "audio_unpacked");
 
 var db = CardDatabase.LoadCsv(cardsCsv);
 var table = new Table(db.Cards) { OrphanGrace = TimeSpan.FromSeconds(opt.GraceSeconds) };
+
+// Cards the user switched off in the collection (never shuffled into the virtual deck; still playable from the board).
+string disabledPath = Path.Combine(root, "data", "disabled.json");
+void SaveDisabled() { try { File.WriteAllText(disabledPath, System.Text.Json.JsonSerializer.Serialize(table.DisabledCids)); } catch (Exception e) { Console.WriteLine("disabled: " + e.Message); } }
+try { if (File.Exists(disabledPath)) table.SetDisabled(System.Text.Json.JsonSerializer.Deserialize<string[]>(File.ReadAllText(disabledPath)) ?? Array.Empty<string>()); }
+catch (Exception e) { Console.WriteLine("disabled: " + e.Message); }
 string lanesData = Path.Combine(root, "data", "lanes");
 string lanesBoard = Path.Combine(lanesData, "lanes_leaderboard.json");
 string partyData = Path.Combine(root, "data", "party");
@@ -314,6 +320,10 @@ var json = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = 
 
 app.MapGet("/api/players", () => table.Snap().Players);
 
+// Host-only (needs the window token; not a phone route): remove a player from the table.
+app.MapPost("/api/kick", (KickRequest req) =>
+    Results.Ok(new { ok = !string.IsNullOrWhiteSpace(req.Name) && table.RemovePlayer(req.Name!) }));
+
 app.MapPost("/api/join", (JoinRequest req) =>
 {
     var r = table.Join(req.Name ?? "", req.Token);
@@ -341,9 +351,27 @@ app.MapPost("/api/button", (TokenRequest? req) => R(req?.Token, table.Button(req
 // Host (big-screen) controls: choose mode, start, options
 // ---- badges (badges01.txt; progress in data/badges.json) ----
 var collection = new CardCollection(Path.Combine(root, "data"));
+// Portable verified-cards save: <install folder>\saves\verified-cards.json mirrors the collection (each card's UID and
+// its board signature). Copy it into the same folder on another of your PCs and OpenMix there adds those cards at
+// start, checking every signature again and working out each card from its UID, so that PC passes Add to Collection
+// without the board.
+collection.UseSaveFile(Path.Combine(AppContext.BaseDirectory, "saves", "verified-cards.json"),
+    uid => db.Resolve(BoardProtocol.CtiFromUid(uid)) is Card c ? (c.Cid, c.Icon) : null);
+
+// The virtual deck only draws cards the player really has: scanned into the collection, or with hand-imported audio
+// (those count as scanned, just awaiting their card data). Physical board cards are always playable regardless.
+HashSet<string> AvailableCids()
+{
+    var set = collection.OwnedCids();                                  // scanned-in cards
+    foreach (var c in db.Cards)
+        if (HasPreview(c)) set.Add(c.Cid);                             // + cards whose audio was hand-imported (playable samples present)
+    return set;
+}
+void RefreshAvailable() => table.SetAvailableCards(AvailableCids());
+RefreshAvailable();
 // Ownership gate: until the user has added at least one signature-checked card on their board, OpenMix opens on
 // the Add to Collection screen (--no-gate for development).
-Views.GateState = () => new { needCards = !opt.NoGate && collection.Count == 0, cards = cardContent.View() };
+Views.GateState = () => new { needCards = false, cards = cardContent.View() };   // every card counts as owned: no scan needed to start
 var simUids = new List<(int Slot, Card Card, ulong Uid)>(); long simSerial = 0;
 var badges = new BadgeStore(Path.Combine(root, "data"), cid => db.ResolveCid(cid) is Card bc ? (bc.Name, bc.ImageName) : null);
 badges.Unlocked += u => { Console.WriteLine($"badge: {u.Title} — {u.Text}"); director?.UiSfx("achieve_ping"); table.Touch(); };
@@ -464,6 +492,7 @@ app.MapPost("/api/studio", (StudioRequest req) =>
 // Settings: music and effects volume, saved in data/settings.json
 string settingsFile = Path.Combine(root, "data", "settings.json");
 double musicVol = 1, fxVol = 1, crowdVol = 1; bool reminders = true; string language = "en";
+string artDownload = "";   // card-art download scope: "all" | "collection" | "" (unset -> first-run prompt asks)
 try
 {
     if (File.Exists(settingsFile))
@@ -474,6 +503,7 @@ try
         if (sd.RootElement.TryGetProperty("crowd", out var cv)) crowdVol = Math.Clamp(cv.GetDouble(), 0, 1);
         if (sd.RootElement.TryGetProperty("reminders", out var rv)) reminders = rv.GetBoolean();
         if (sd.RootElement.TryGetProperty("language", out var lv)) language = lv.GetString() ?? "en";
+        if (sd.RootElement.TryGetProperty("artDownload", out var dv)) artDownload = dv.GetString() ?? "";
     }
 }
 catch { }
@@ -484,7 +514,19 @@ void ApplySettings()
     if (director != null) { director.SfxGain = 0.6 * fxVol * fxVol; director.CrowdGain = crowdVol * crowdVol; }   // 0.6 = the engine's default level
 }
 ApplySettings();
-object SettingsView() => new { music = musicVol, effects = fxVol, crowd = crowdVol, reminders, language, languages = Loc.Languages, audio = mix != null, board = opt.Board, version = "OpenMix " + (typeof(ContentPaths).Assembly.GetName().Version?.ToString(3) ?? "0.1.0") + " (unofficial; plays content imported from DropMix 1.9.0)" };
+cardContent.Scope = artDownload == "collection" ? "collection" : "all";
+cardContent.ScopeChosen = artDownload is "all" or "collection";
+if (cardContent.ScopeChosen) cardContent.AutoPull();   // on launch: background-pull missing art for the chosen scope
+// a card placed on the board whose content (art or the unencrypted audio) isn't downloaded yet: fetch it on demand
+table.PadChanged += (pad, c) =>
+{
+    if (c == null) return;
+    bool hasArt = c.ImageName.Length == 0 || File.Exists(Path.Combine(root, "cardassets", "card_png", c.ImageName + ".png")) || File.Exists(Path.Combine(root, "cardassets", "card_thumb", c.ImageName + ".jpg"));
+    bool hasAudio = c.AudioId.Length == 0 || Directory.Exists(Path.Combine(audioDir, c.AudioId));
+    if (hasArt && hasAudio) return;
+    cardContent.QueueArt(new[] { (int)c.Cti });
+};
+object SettingsView() => new { music = musicVol, effects = fxVol, crowd = crowdVol, reminders, language, artDownload, languages = Loc.Languages, audio = mix != null, board = opt.Board, version = "OpenMix " + (typeof(ContentPaths).Assembly.GetName().Version?.ToString(3) ?? "0.1.0") + " (unofficial; plays content imported from DropMix 1.9.0)" };
 app.MapGet("/api/settings", () => SettingsView());
 // Pause popup: hold the mode timers while it is open
 app.MapPost("/api/pause", (PauseRequest req) => { table.Paused = req.On; table.Touch(); return Results.Ok(new { paused = table.Paused }); });
@@ -494,9 +536,10 @@ app.MapPost("/api/settings", (SettingsRequest req) =>
     if (req.Effects is double f) fxVol = Math.Clamp(f, 0, 1);
     if (req.Crowd is double c) crowdVol = Math.Clamp(c, 0, 1);
     if (req.Reminders is bool r) reminders = r;
+    if (req.ArtDownload is "all" or "collection") { artDownload = req.ArtDownload; cardContent.Scope = artDownload == "collection" ? "collection" : "all"; cardContent.ScopeChosen = true; cardContent.AutoPull(); table.Touch(); }
     if (req.Language is string lg && Loc.Languages.Contains(lg)) { language = lg; table.Touch(); }
     ApplySettings();
-    try { File.WriteAllText(settingsFile, JsonSerializer.Serialize(new { music = musicVol, effects = fxVol, crowd = crowdVol, reminders, language })); } catch { }
+    try { File.WriteAllText(settingsFile, JsonSerializer.Serialize(new { music = musicVol, effects = fxVol, crowd = crowdVol, reminders, language, artDownload })); } catch { }
     return Results.Ok(SettingsView());
 });
 
@@ -537,6 +580,81 @@ app.MapGet("/api/text/{name}", (string name) =>
     // the original game's own documents, imported from the user's copy: shown for reference, labelled as historical
     var f = Path.Combine(root, "data", "text", name + ".txt");
     return File.Exists(f) ? Results.Text(File.ReadAllText(f), "text/plain; charset=utf-8") : Results.NotFound();
+});
+
+// Collection browser: the whole catalog, grouped by deck, every card owned
+app.MapGet("/api/catalog", () =>
+{
+    var meta = decks.Decks.ToDictionary(d => d.Icon, d => d);
+    var groups = table.AllCards.Where(c => c.Type.ToString() != "Invalid").GroupBy(c => c.Icon)
+        .Select(g =>
+        {
+            meta.TryGetValue(g.Key, out var d);
+            return new
+            {
+                icon = g.Key, name = d?.Name ?? g.Key, kind = d?.Kind ?? "", season = d?.Season ?? 0,
+                cards = g.OrderBy(c => c.Cid).Select(c => new
+                {
+                    cid = c.Cid, name = c.Name, artist = c.Artist, type = c.Type.ToString().ToLowerInvariant(),
+                    power = c.Power, image = c.ImageName, tempo = (int)c.Tempo,
+                    key = c.Key.ToString(), mode = c.Mode.ToString(), ability = c.Ability, instruments = c.Instruments,
+                    audio = HasPreview(c), disabled = table.IsDisabled(c.Cid),
+                }).ToList(),
+            };
+        }).OrderBy(g => g.season).ThenBy(g => g.name).ToList();
+    return new { decks = groups, total = groups.Sum(g => g.cards.Count) };
+});
+
+// ---- card sound preview: render the card's own phrase offline (its tempo/key, so no transpose or stretch) ----
+var previewCache = new System.Collections.Concurrent.ConcurrentDictionary<string, byte[]>();
+string? PreviewDir(string audioId)   // tolerate both the double-nested <id>/<id>/ and flat <id>/ layouts
+{
+    if (string.IsNullOrEmpty(audioId)) return null;
+    foreach (var dir in new[] { Path.Combine(audioDir, audioId, audioId), Path.Combine(audioDir, audioId) })
+        if (Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*.midisong").Any()
+            && Directory.Exists(Path.Combine(dir, "samples")) && Directory.EnumerateFiles(Path.Combine(dir, "samples")).Any())
+            return dir;
+    return null;
+}
+bool HasPreview(Card c) => PreviewDir(c.AudioId) != null;
+byte[]? RenderPreview(Card c)
+{
+    if (!HasPreview(c)) return null;
+    return previewCache.GetOrAdd(c.Cid, _ =>
+    {
+        const int rate = 24000;
+        var m = new MixEngine(rate);
+        var dir = new MixDirector(m, audioDir) { PinMaster = true };
+        if (c.Key != MusicKey.None) dir.SetKey((int)c.Key, c.Mode == MusicMode.Minor);   // the card's own key -> no transpose
+        dir.SetTempo(c.Tempo > 0 ? c.Tempo : 120);                                        // its own tempo -> no time-stretch
+        dir.SetSlotVolume(0, 0.85);
+        dir.OnSlot(0, c, Rules.AudioParts(c, 0), false);
+        m.WaitIdle();                                                                     // offline: let the render land
+        var outBuf = new List<float>(); var chunk = new float[2400];
+        int want = rate * 6 * 2;                                                          // ~6 seconds, stereo
+        while (outBuf.Count < want) { m.Read(chunk, 0, chunk.Length); outBuf.AddRange(chunk); }
+        var pcm = outBuf.ToArray();
+        int fin = Math.Min(pcm.Length / 2, rate / 50), fade = Math.Min(pcm.Length / 2, rate);   // ~20 ms in, 1 s out
+        for (int f = 0; f < fin; f++) { float g = (float)f / fin; pcm[f * 2] *= g; pcm[f * 2 + 1] *= g; }
+        for (int f = 0; f < fade; f++) { float g = 1 - (float)f / fade; int at = pcm.Length / 2 - fade + f; pcm[at * 2] *= g; pcm[at * 2 + 1] *= g; }
+        return WavWriter.Stereo16Bytes(pcm, rate);
+    });
+}
+app.MapGet("/api/preview/{cid}", async (string cid) =>
+{
+    var c = db.ResolveCid(cid);
+    if (c == null) return Results.NotFound();
+    var bytes = await Task.Run(() => RenderPreview(c));
+    return bytes == null ? Results.NotFound() : Results.File(bytes, "audio/wav");
+});
+
+// ---- disable a card from being shuffled into the virtual deck (the collection toggle) ----
+app.MapPost("/api/card/disable", (CardDisableRequest req) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Cid) || db.ResolveCid(req.Cid) == null) return Results.BadRequest(new { error = "Unknown card." });
+    table.SetCardEnabled(req.Cid!, req.Enabled);
+    SaveDisabled();
+    return Results.Ok(new { cid = req.Cid, disabled = !req.Enabled });
 });
 
 // Deck manager
@@ -789,6 +907,7 @@ app.MapPost("/api/collection/claim/add", async () =>
             }
             int newCards = collection.OwnedCids().Except(before).Count();
             Console.WriteLine($"collection: {added} added, {failed} failed, {newCards} new cards (collection {collection.Count})");
+            if (added > 0) RefreshAvailable();                              // newly scanned cards join the virtual deck
             var owned = collection.OwnedCids();
             foreach (var icon in icons)                                    // Badge_RegisterCards: every card of the playlist registered
                 if (table.AllCards.Where(c => c.Icon == icon).All(c => owned.Contains(c.Cid))) badges.Track("collection_registerAll", null, icon);
@@ -811,7 +930,7 @@ app.MapPost("/api/cardcontent/download", () => { cardContent.Prepare(); return R
 app.MapPost("/api/cardcontent/confirm", () => { cardContent.Confirm(); return Results.Ok(); });
 app.MapPost("/api/cardcontent/cancel", () => { cardContent.Cancel(); return Results.Ok(); });
 app.MapPost("/api/cardcontent/delete", () => { cardContent.DeleteAll(); return Results.Ok(); });
-app.MapPost("/api/collection/reset", () => { collection.Reset(); claim.Dirty = true; return Results.Ok(); });
+app.MapPost("/api/collection/reset", () => { collection.Reset(); claim.Dirty = true; RefreshAvailable(); return Results.Ok(); });
 
 // table UI sounds (SFXCard/button_select, slider, card_removed, Actions/SplashAnim): bank clips, random variant
 app.MapPost("/api/uisfx", (MixRequest req) =>
@@ -976,11 +1095,12 @@ app.MapGet("/api/watch", async (HttpContext ctx) =>
 app.MapGet("/art/{image}", (HttpContext ctx, string image) =>
 {
     var safe = Path.GetFileNameWithoutExtension(image);
-    ctx.Response.Headers.CacheControl = "public, max-age=86400";
     var jpg = Path.Combine(thumbDir, safe + ".jpg");
-    if (File.Exists(jpg)) return Results.File(jpg, "image/jpeg");
+    if (File.Exists(jpg)) { ctx.Response.Headers.CacheControl = "public, max-age=86400"; return Results.File(jpg, "image/jpeg"); }
     var png = Path.Combine(pngDir, safe + ".png");
-    return File.Exists(png) ? Results.File(png, "image/png") : Results.NotFound();
+    if (File.Exists(png)) { ctx.Response.Headers.CacheControl = "public, max-age=86400"; return Results.File(png, "image/png"); }
+    ctx.Response.Headers.CacheControl = "no-store";   // never cache a miss: art not downloaded yet must re-fetch once it is
+    return Results.NotFound();
 });
 // Original game UI art (slot frames, logo, icons, crowd), served from the ripped assets.
 string uiDir = Path.Combine(root, "assets_raw");
@@ -1035,12 +1155,11 @@ else
 object DecksView()
 {
     var active = decks.Decks.Where(d => table.IsDeckActive(d.Icon)).ToList();
-    var owned = collection.OwnedCids();
-    var ownedBy = table.AllCards.Where(c => c.Icon != null && owned.Contains(c.Cid)).GroupBy(c => c.Icon!).ToDictionary(g => g.Key, g => g.Count());
+    // every card counts as owned, so each deck is fully owned and the collection total equals the catalog
     return new
     {
-        decks = decks.Decks.Select(d => new { d.Icon, d.Name, d.Kind, d.Season, d.Count, active = table.IsDeckActive(d.Icon), owned = ownedBy.GetValueOrDefault(d.Icon) }),
-        ownedCount = table.AllCards.Count(c => owned.Contains(c.Cid)),
+        decks = decks.Decks.Select(d => new { d.Icon, d.Name, d.Kind, d.Season, d.Count, active = table.IsDeckActive(d.Icon), owned = d.Count }),
+        ownedCount = table.AllCards.Count,
         totalCards = table.AllCards.Count,
         activeCount = active.Count,
         cardCount = table.ActiveCards.Count,
@@ -1079,6 +1198,13 @@ static void RunTableWindow(string url, IHostApplicationLifetime life)
                 .SetContextMenuEnabled(false)
                 .SetDevToolsEnabled(false)
                 .SetLogVerbosity(0);
+            // the web UI asks for fullscreen (F11 / the Settings toggle) through a web message, since only the native
+            // window can cover the whole monitor
+            w.RegisterWebMessageReceivedHandler((object? sender, string msg) =>
+            {
+                if (sender is Photino.NET.PhotinoWindow win && msg == "fullscreen")
+                    try { win.SetFullScreen(!win.FullScreen); } catch { }
+            });
             var ico = Path.Combine(AppContext.BaseDirectory, "app.ico");   // OpenMix icon
             if (File.Exists(ico)) w.SetIconFile(ico);
             w.Load(new Uri(url));
@@ -1103,6 +1229,7 @@ static IEnumerable<string> LanAddresses() =>
         .Distinct();
 
 record JoinRequest(string? Name, string? Token);
+record KickRequest(string? Name);
 record PlayRequest(string? Token, string? Cid, int Pad);
 record TokenRequest(string? Token);
 record PadRequest(string? Token, int Pad);
@@ -1111,11 +1238,12 @@ record ModeActionRequest(string? Token, string? Action, string? Arg);
 record ModeRequest(string? Mode, Dictionary<string, string>? Options);
 record HostRequest(string? Action, Dictionary<string, string>? Args);
 record DecksRequest(string[]? Active, string[]? Toggle, string? Preset);
-record SettingsRequest(double? Music, double? Effects, double? Crowd, bool? Reminders, string? Language);
+record SettingsRequest(double? Music, double? Effects, double? Crowd, bool? Reminders, string? Language, string? ArtDownload);
 record PauseRequest(bool On);
 record LightsRequest(double? Offset);
 record StudioRequest(string? Action, double? Value, int? Slot);
 record MixRequest(string? Id, string? Name);
+record CardDisableRequest(string? Cid, bool Enabled);
 record BoardSimRequest(int Slot, string? Cid, int? Cti, bool Added, string? Uid = null);
 record DeckBuilderRequest(bool Open);
 
@@ -1140,6 +1268,11 @@ sealed class Options
     public static Options Parse(string[] a)
     {
         var o = new Options();
+#if DEBUGTOOLS
+        // openmix-debug.exe (built with -p:DebugTools=true): open straight to the game UI with a simulated board,
+        // so desktop and phone screenshots can be taken without a DropMix board or owned cards. Flags still override.
+        o.NoGate = true; o.BoardSim = true; o.NoBoard = true;
+#endif
         for (int i = 0; i < a.Length; i++)
             switch (a[i])
             {
@@ -1149,10 +1282,11 @@ sealed class Options
                 case "--board-trace": o.Board = true; o.BoardTrace = true; break;
                 case "--no-audio": o.NoAudio = true; break;
                 case "--no-window": o.NoWindow = true; break;
-#if DEBUG
+#if DEBUG || DEBUGTOOLS
                 // development only; release builds have no way around the board check
                 case "--board-sim": o.BoardSim = true; break;
                 case "--no-gate": o.NoGate = true; break;
+                case "--gate": o.NoGate = false; break;      // re-enable the ownership gate in a debug build
 #endif
                 case "--hand": o.Hand = int.Parse(a[++i]); break;
                 case "--grace": o.GraceSeconds = double.Parse(a[++i], System.Globalization.CultureInfo.InvariantCulture); break;
@@ -1172,7 +1306,7 @@ static class Views
     /// <summary>Printed details (print ID, "NN/15") from the set CSVs, for the physical-card look on phones.</summary>
     public static Dictionary<string, (string print, int index, int count)> Print = new();
     public record PadV(int Pad, CardV? Top, string? Source, string? PlayedBy, int Stack, string? Owner, bool Silenced, bool Valid);
-    public record PlayerV(string Name, string Status, int HandCount, string Team);
+    public record PlayerV(string Name, string Status, int HandCount, string Team, bool Board);
     public record StateV(long Version, string? You, PadV[] Pads, CardV[] Hand, PlayerV[] Players, int Deck, object Mode, object? Mix, object? Board, object? Badges, object? Walk, object? Gate);
     /// <summary>Mix tempo/key/bar for the screens (set by the host when audio is on).</summary>
     public static Func<object?> MixState = () => null;
@@ -1201,6 +1335,6 @@ static class Views
         s.Pads.Select(p => new PadV(p.Pad, p.Top is null ? null : Of(p.Top.Card), p.Top?.Source.ToString(), p.Top?.PlayedBy, p.StackCount,
             p.Top?.Owner is Side o && o != Side.None ? o.ToString() : null, p.Top?.Silenced ?? false, p.Top?.Valid ?? true)).ToArray(),
         (s.Hand ?? Array.Empty<Card>()).Select(Of).ToArray(),
-        s.Players.Select(p => new PlayerV(p.Name, p.Status.ToString(), p.HandCount, p.Team.ToString())).ToArray(),
+        s.Players.Select(p => new PlayerV(p.Name, p.Status.ToString(), p.HandCount, p.Team.ToString(), p.Board)).ToArray(),
         s.DeckCount, s.Mode, MixState(), BoardState(), BadgeState(), WalkState(), GateState());
 }

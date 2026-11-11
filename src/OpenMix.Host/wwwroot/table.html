@@ -48,6 +48,8 @@
   .player { display: flex; align-items: center; gap: .6vw; background: #000b; border: 1px solid var(--line); border-radius: 99px; padding: .6vh 1.1vw; font-size: 1.9vh; }
   .player .hc { color: var(--dim); font-size: 1.6vh; }
   .player.turn { border-color: #fff; box-shadow: 0 0 1.6vh #fff6; }
+  .player .kick { display: grid; place-items: center; width: 2.4vh; height: 2.4vh; margin-left: .2vw; padding: 0; border: 0; border-radius: 50%; background: #ffffff1a; color: var(--dim); font: 700 1.9vh/1 "Segoe UI", sans-serif; cursor: pointer; }
+  .player .kick:hover { background: var(--bad, #e8453c); color: #fff; }
   #tempo { margin-left: auto; color: var(--dim); font-size: 1.8vh; }
   #tempo b { color: #fff; }
   #empty { text-align: center; color: var(--dim); font-size: 2.2vh; }
@@ -130,9 +132,16 @@ function render() {
 
   const teamOf = p => p.team && p.team !== 'None' ? ` t-${p.team.toLowerCase()}` : '';
   $('#players').innerHTML = s.players.length
-    ? s.players.map(p => `<span class="player${teamOf(p)}${s.mode?.current && p.team === s.mode.current && s.mode.phase === 'play' ? ' turn' : ''}" style="${teamOf(p) ? 'border-color:var(--team)' : ''}"><span class="dot${p.status === 'Orphaned' ? ' off' : ''}"></span>${esc(p.name)}<span class="hc">${p.handCount}</span></span>`).join('')
+    ? s.players.map(p => `<span class="player${teamOf(p)}${s.mode?.current && p.team === s.mode.current && s.mode.phase === 'play' ? ' turn' : ''}" style="${teamOf(p) ? 'border-color:var(--team)' : ''}"><span class="dot${p.status === 'Orphaned' ? ' off' : ''}"></span>${esc(p.name)}<span class="hc">${p.handCount}</span><button class="kick" data-kick="${esc(p.name)}" title="Remove ${esc(p.name)}" aria-label="Remove ${esc(p.name)}">×</button></span>`).join('')
     : '';
   document.querySelector('footer .lbl').style.visibility = s.players.length ? '' : 'hidden';   // the QR code already says how to join
+  // host-only: tap the × on a player to remove them (the token goes with the request automatically)
+  $('#players').onclick = e => {
+    const b = e.target.closest('[data-kick]'); if (!b) return;
+    const name = b.dataset.kick;
+    if (confirm('Remove ' + name + ' from the table?'))
+      fetch('/api/kick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  };
 
   const playing = s.pads.map(p => p.top).filter(Boolean);
   const lead = playing[0];

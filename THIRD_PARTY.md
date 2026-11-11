@@ -20,6 +20,7 @@ The import tools are pinned to exact releases by SHA-256 in `installer/build.ps1
 | ↳ [Mono.Cecil](https://github.com/jbevain/cecil) | Assembly reading | MIT | `Mono.Cecil-LICENSE.txt` |
 | ↳ System.IO.Hashing | Hashing | MIT (.NET) | `dotnet-LICENSE.txt` |
 | [Il2CppDumper](https://github.com/Perfare/Il2CppDumper) 6.7.46 | Type information for reading the game's scene settings during import (`tools/Il2CppDumper`) | MIT | `Il2CppDumper-LICENSE.txt` |
+| [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) (adb) r35.0.0 | Optional install component: copy DropMix off an Android phone over USB (`tools/platform-tools`) | Apache-2.0 | `tools/platform-tools/NOTICE.txt`, `Apache-2.0.txt` |
 | [vgmstream](https://github.com/vgmstream/vgmstream) | `src/OpenMix.Importer/Fsb5.cs` follows its FADPCM decoder | ISC-style | `vgmstream-COPYING.txt` |
 
 Not shipped: AssetStudio's FBX exporter (Autodesk FBX SDK), FMOD and Oodle libraries. OpenMix never calls them.

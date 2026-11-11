@@ -90,7 +90,7 @@ window.OMLoc = (function () {
         <div class="well ${lit} ${tgt} ${st}" style="${style}">${owner}
           <div class="rimlight"></div>
           <div class="pocket">${c
-            ? `<div class="incard c-${c.type}"><img src="/art/${encodeURIComponent(c.image)}" alt="">${opt.size === 'table' && c.power ? `<img class="pw" src="/ui/sys_power_${Math.min(3, c.power)}" alt="">` : ''}</div>`
+            ? `<div class="incard c-${c.type}"><img src="/art/${encodeURIComponent(c.image)}?v=${(state && state.gate && state.gate.cards && state.gate.cards.version) || 0}" alt="">${opt.size === 'table' && c.power ? `<img class="pw" src="/ui/sys_power_${Math.min(3, c.power)}" alt="">` : ''}</div>`
             : `<span class="slotnum">${p.pad + 1}</span>`}
             ${p.stack > 1 ? `<span class="stackn">×${p.stack}</span>` : ''}</div>
         </div>
@@ -118,7 +118,7 @@ window.OMLoc = (function () {
       const tgt = sel ? ((legal == null || legal.includes(k)) ? ' target' : ' dead') : '';
       const n = c ? Math.max(0, Math.min(3, c.power || 0)) : 0;
       const body = c
-        ? `<div class="vu">${[0, 1, 2].map(i => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div><div class="art"><img src="/art/${encodeURIComponent(c.image)}" alt=""></div>
+        ? `<div class="vu">${[0, 1, 2].map(i => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div><div class="art"><img src="/art/${encodeURIComponent(c.image)}?v=${(state && state.gate && state.gate.cards && state.gate.cards.version) || 0}" alt=""></div>
            ${p.silenced ? '<div class="x"></div>' : ''}${p.valid === false ? '<div class="bad"></div>' : ''}${p.owner ? `<div class="team"><i style="-webkit-mask-image:url('/ui/${TEAM_ICON[p.owner]}');mask-image:url('/ui/${TEAM_ICON[p.owner]}')"></i></div>` : ''}`
         : `<img class="frame" src="/ui/shell_slot_0${4 - k}" alt="">`;
       const who = !c ? '' : p.source === 'Board' ? 'on the board' : (p.playedBy || '');
@@ -282,7 +282,7 @@ window.OMLoc = (function () {
     const ins = (c.instruments || []).map((x, i) => [String(x).toLowerCase(), c.type === 'Wild' ? WILD_INST[i] : col]).filter(([x]) => INST.includes(x));
     if (c.type === 'Wild') ins.reverse();
     return `<div class="pcard c-${c.type}" style="--pc:${col}">
-      <div class="pcart">${c.image ? `<img src="/art/${encodeURIComponent(c.image)}" alt="" draggable="false">` : ''}</div>${powerSvg(c)}
+      <div class="pcart">${c.image ? `<img src="/art/${encodeURIComponent(c.image)}?v=${(window.__cardVer || 0)}" alt="" draggable="false">` : ''}</div>${powerSvg(c)}
       <div class="pctext">${c.type === 'Fx' ? `<b>${esc(c.name)}</b>` :`<b>${esc(c.artist)}</b><span>${esc(c.name)}</span>`}</div>
       <div class="pcfoot"><div class="pcins">${c.type === 'Fx' ? (c.picto ? `<img class="pcfx" src="/ui/${encodeURIComponent(c.picto)}" alt="">` : abilityPics(c.ability)) : ''}${ins.map(([x, k]) => `<i style="--ic:${k};-webkit-mask-image:url('/ui/instrument_${x}');mask-image:url('/ui/instrument_${x}')"></i>`).join('')}</div>
 </div>

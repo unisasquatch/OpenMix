@@ -160,11 +160,20 @@ public sealed class LanesMode : GameMode
     public override void Start()
     {
         _phase = Phase.Lobby;
+        T.ClearBoardPlayers();
         if (BoardMustBeCleared()) { Notice("Remove all cards from the board to start."); return; }
         foreach (var l in _lanes) l.Clear();
         Array.Clear(_dangerSpawn);
         _events.Clear(); _clears.Clear();
     }
+
+    // "ADD YOUR DECK TO JOIN": the lobby offers a single join on the centre slot (the lights mark slot 3).
+    public override void BoardSetup(Card card, int pad)
+    {
+        if (_phase == Phase.Lobby && pad == 2 && T.Players.Count(p => p.Status != PlayerStatus.Orphaned) < 5)
+            T.SeatBoardPlayer(pad);
+    }
+
 
     void BeginGame()
     {
@@ -665,6 +674,7 @@ public sealed class LanesMode : GameMode
 
     public override void BoardLifted(Card card, int pad)
     {
+        if (_phase == Phase.Lobby) { T.UnseatBoardPlayer(pad); return; }   // lifting the deck withdraws the board player
         var s = T.Pads[pad];
         int i = s.FindLastIndex(pc => pc.Source == CardSource.Board && pc.Card.Cid == card.Cid);
         if (i >= 0) s.RemoveAt(i);

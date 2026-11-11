@@ -61,6 +61,27 @@ public sealed class CardAssets
         return owned.Values.ToList();
     }
 
+    /// <summary>Cards named in data/collection.json, resolved from the catalog by Cid (used for the "only my collection"
+    /// download scope). Two copies of a card collapse to one.</summary>
+    public List<CardFiles> CollectionCards()
+    {
+        var byCid = AllCards().GroupBy(c => c.Cid).ToDictionary(g => g.Key, g => g.First());
+        var f = Path.Combine(_content, "data", "collection.json");
+        if (!File.Exists(f)) return new();
+        var picked = new Dictionary<string, CardFiles>();
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(f));
+            foreach (var e in doc.RootElement.EnumerateArray())
+            {
+                var cid = e.TryGetProperty("Cid", out var c) ? c.GetString() : null;
+                if (cid != null && byCid.TryGetValue(cid, out var card)) picked[cid] = card;
+            }
+        }
+        catch { }
+        return picked.Values.ToList();
+    }
+
     public List<CardFiles> AllCards() =>
         Csv.Read(File.ReadAllText(Path.Combine(_content, "data", "cards.csv")))
            .Where(r => int.TryParse(r.GetValueOrDefault("CTI"), out _))
@@ -70,6 +91,12 @@ public sealed class CardAssets
     public bool HasContent(CardFiles c) =>
         (c.Image.Length == 0 || File.Exists(Path.Combine(_content, "cardassets", "card_png", c.Image + ".png")))
         && (c.Audio.Length == 0 || Directory.Exists(Path.Combine(_content, "audio_unpacked", c.Audio)));
+
+    /// <summary>Whether this card's art (only) is already on disk — the art pull fetches art and ignores audio.</summary>
+    public bool HasArt(CardFiles c) =>
+        c.Image.Length == 0
+        || File.Exists(Path.Combine(_content, "cardassets", "card_png", c.Image + ".png"))
+        || File.Exists(Path.Combine(_content, "cardassets", "card_thumb", c.Image + ".jpg"));
 
     /// <summary>Bytes of card content stored on this PC (art and card music; not the game's own sounds).</summary>
     public long StoredBytes()
@@ -102,16 +129,17 @@ public sealed class CardAssets
         return http;
     }
 
-    /// <summary>Download size in bytes for the cards that still need content (for the confirm prompt).</summary>
-    public async Task<long> EstimateAsync(IReadOnlyList<CardFiles> cards, CancellationToken ct)
+    /// <summary>Download size in bytes for the cards that still need content (for the confirm prompt). With
+    /// <paramref name="artOnly"/>, only missing art is counted (audio comes from the import, never the server).</summary>
+    public async Task<long> EstimateAsync(IReadOnlyList<CardFiles> cards, CancellationToken ct, bool artOnly = false)
     {
         // count each missing file on its own: a card may already have its art but not its music, or a local copy of one
-        var need = cards.Where(c => !HasContent(c)).Select(c => (c, missing: Missing(c))).Where(x => x.missing.art || x.missing.music).ToList();
+        var need = cards.Where(c => !HasContent(c)).Select(c => (c, missing: Missing(c))).Where(x => x.missing.art || (x.missing.music && !artOnly)).ToList();
         if (need.Count == 0) return 0;
         using var http = NewClient();
         var meta = await FetchMetadata(http, need.Select(x => x.c.Cti), ct);
         return need.Sum(x => meta.TryGetValue(x.c.Cti, out var m)
-            ? (x.missing.art ? Bytes(m, "image_bytes_and") : 0) + (x.missing.music ? Bytes(m, "audio_bytes") : 0) : 0);
+            ? (x.missing.art ? Bytes(m, "image_bytes_and") : 0) + (x.missing.music && !artOnly ? Bytes(m, "audio_bytes") : 0) : 0);
     }
 
     /// <summary>Which of a card's files still have to come from the server (not installed, and not in the local folder).</summary>
@@ -135,27 +163,34 @@ public sealed class CardAssets
     }
 
     /// <summary>Fetches and installs content for <paramref name="cards"/> that don't have it yet, one file at a time.
-    /// <paramref name="progress"/> gets (bytes done, bytes total). Throws <see cref="DownloadError"/>.</summary>
-    public async Task<int> DownloadAsync(IReadOnlyList<CardFiles> cards, string assetStudio, Action<long, long>? progress, CancellationToken ct)
+    /// <paramref name="progress"/> gets (bytes done, bytes total). Art is decoded to card_png in small batches as it
+    /// arrives (not all at the end), so it appears progressively and partial progress survives a cancel;
+    /// <paramref name="onDecoded"/> fires after each batch (and at the end) so callers can refresh their views.
+    /// Throws <see cref="DownloadError"/>.</summary>
+    public async Task<int> DownloadAsync(IReadOnlyList<CardFiles> cards, string assetStudio, Action<long, long>? progress, CancellationToken ct, bool artOnly = false, Action? onDecoded = null)
     {
-        var need = cards.Where(c => !HasContent(c)).GroupBy(c => c.Cti).Select(g => g.First()).ToList();
+        const int DecodeEvery = 12;   // decode a batch this often so card art shows up while the rest downloads
+        var need = cards.Where(c => artOnly ? Missing(c).art : !HasContent(c)).GroupBy(c => c.Cti).Select(g => g.First()).ToList();
         _log($"{cards.Count} cards selected, {need.Count} need content");
         if (need.Count == 0) return 0;
         var bundles = Path.Combine(_work, "card_art"); Directory.CreateDirectory(bundles);
+        var pngDir = Path.Combine(_content, "cardassets", "card_png");
         using var http = NewClient();
         Dictionary<int, JsonElement>? meta = null;
-        long total = 0, done = 0; int installed = 0;
+        long total = 0, done = 0; int installed = 0, pendingDecode = 0;
+        void Decode() { if (pendingDecode == 0) return; DecodeArt(bundles, pngDir, assetStudio); foreach (var f in Directory.GetFiles(bundles)) { try { File.Delete(f); } catch { } } pendingDecode = 0; onDecoded?.Invoke(); }
         foreach (var c in need)
         {
             ct.ThrowIfCancellationRequested();
             var (art, audio) = Local(c);
             var (needArt, needMusic) = Missing(c);          // only files neither installed nor in the local folder
+            if (artOnly) { audio = null; needMusic = false; }   // audio comes from the import, never the server
             if (needArt || needMusic)
             {
                 if (meta == null)
                 {
                     meta = await FetchMetadata(http, need.Select(n => n.Cti), ct);
-                    total = need.Sum(n => { var (a2, m2) = Missing(n); return meta.TryGetValue(n.Cti, out var mm) ? (a2 ? Bytes(mm, "image_bytes_and") : 0) + (m2 ? Bytes(mm, "audio_bytes") : 0) : 0; });
+                    total = need.Sum(n => { var (a2, m2) = Missing(n); return meta.TryGetValue(n.Cti, out var mm) ? (a2 ? Bytes(mm, "image_bytes_and") : 0) + (m2 && !artOnly ? Bytes(mm, "audio_bytes") : 0) : 0; });
                     progress?.Invoke(done, total);
                 }
                 if (!meta.TryGetValue(c.Cti, out var m)) { _log($"  {c.Cid}: the card server has no files for it"); continue; }
@@ -164,13 +199,14 @@ public sealed class CardAssets
             }
             try
             {
-                if (art != null) await File.WriteAllBytesAsync(Path.Combine(bundles, c.Image + ".png"), art, ct);
+                if (art != null) { await File.WriteAllBytesAsync(Path.Combine(bundles, c.Image + ".png"), art, ct); pendingDecode++; }
                 if (audio != null) UnpackMusic(audio, c.Audio);
             }
             catch (IOException e) { throw new DownloadError(Failure.SaveFailed, e.Message); }
             installed++;
+            if (pendingDecode >= DecodeEvery) Decode();
         }
-        DecodeArt(bundles, Path.Combine(_content, "cardassets", "card_png"), assetStudio);
+        Decode();
         return installed;
     }
 
@@ -244,6 +280,9 @@ public sealed class CardAssets
         for (int i = 0; i < n; i++) { int size = br.ReadInt32(); entries.Add((br.ReadString(), size)); }
         long pos = br.BaseStream.Position;
         if (entries.Any(e => e.size < 0) || pos + entries.Sum(e => (long)e.size) > data.Length) throw new InvalidDataException("bad music archive");
+        // the mix engine loads a card's audio from audio_unpacked/<audioId>/<audioId>/... (MixDirector.OnSlot), and the
+        // archive's own paths are already prefixed with the audio id — so joining them under audio_unpacked/<audioId>
+        // yields exactly that layout. (Do NOT strip the prefix: the double directory is intentional, not a bug.)
         var root = Path.GetFullPath(Path.Combine(_content, "audio_unpacked", audioId));
         foreach (var (name, size) in entries)
         {

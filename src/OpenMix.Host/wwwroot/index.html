@@ -236,6 +236,34 @@ function connect() {
   es.onerror = () => $('#connDot').classList.add('off');   // EventSource retries on its own
 }
 
+// Animate the slot VU bars with the live mix levels (/api/levels is a global ~30 Hz SSE, no token needed). Eases the
+// samples so the bars glide, with a little per-bar jitter, and sets --f on each .vu bar and --lvl on the well (LEDs).
+function vuLoop() {
+  const S = { lv: [0, 0, 0, 0, 0] }, shown = [0, 0, 0, 0, 0];
+  const jit = Array.from({ length: 5 }, () => [1, 1, 1].map(() => .6 + Math.random() * .4));
+  let last = performance.now();
+  (function connectLv() {
+    const ls = new EventSource('/api/levels');
+    ls.onmessage = e => { try { const m = JSON.parse(e.data); if (m.lv) S.lv = m.lv; } catch (x) {} };
+    ls.onerror = () => { ls.close(); setTimeout(connectLv, 2000); };
+  })();
+  function frame(now) {
+    const dt = Math.min(.1, (now - last) / 1000); last = now;
+    for (let k = 0; k < 5; k++) shown[k] += ((S.lv[k] || 0) - shown[k]) * (1 - Math.exp(-dt / .04));
+    document.querySelectorAll('.well-col[data-pad]').forEach(el => {
+      const k = +el.dataset.pad;
+      el.style.setProperty('--lvl', (shown[k] || 0).toFixed(3));
+      el.querySelectorAll('.vu i').forEach((b, i) => {
+        const j = jit[k]; j[i] = Math.max(.6, Math.min(1, j[i] + (Math.random() * 4 - 2) * dt));
+        b.style.setProperty('--f', Math.sqrt((shown[k] || 0) * j[i]).toFixed(3));
+      });
+    });
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+vuLoop();
+
 // Which pads a card may go on: the server's mode block is authoritative (state.mode.legal);
 // otherwise use each slot's accepted card types (the board's colour rules). Wild = anywhere.
 function legalPads(cid) {

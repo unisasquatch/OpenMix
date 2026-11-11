@@ -8,6 +8,18 @@
   const pretty = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 
   document.head.insertAdjacentHTML('beforeend', `<style>
+    .mg-timer { width: min(60vw, 420px); height: 12px; background: #0008; border: 1px solid #fff3; border-radius: 6px; overflow: hidden; }
+    .mg-timer i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #50B048, #FFF100 60%, #EB0C6D); }
+    .mg-pads { display: flex; gap: 2vw; justify-content: center; }
+    .mg.phone .mg-pads { gap: 2.4vw; width: 100%; }
+    .mgpad { position: relative; width: var(--cs); height: calc(var(--cs) * .78); padding: 0; border: 2px solid #ffffff22; border-radius: 9px; background: #0006; cursor: pointer; overflow: visible; }
+    .mgpad .art { position: absolute; inset: 0; border-radius: 7px; overflow: hidden; } .mgpad .art img { width: 100%; height: 100%; object-fit: cover; }
+    .mgpad.ok { border-color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 16px 3px #fff9; animation: mgpad 1s ease-in-out infinite; }
+    @keyframes mgpad { 50% { box-shadow: 0 0 0 2px #fff, 0 0 22px 7px #fffd; } }
+    .mgpad .pc { position: absolute; left: 0; right: 0; bottom: -14px; display: flex; justify-content: center; gap: 4px; }
+    .mgpad .pc i { width: 11px; height: 11px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
+    .mgpad .n { position: absolute; top: -8px; right: -8px; font: 700 12px/1 var(--font-num); background: #000b; padding: 2px 5px; border-radius: 8px; }
+    .hc.sel { outline: 3px solid #fff; outline-offset: 2px; }
     .mg { --cs: 7.2vh; display: flex; gap: 2vw; align-items: center; justify-content: center; width: 100%; }
     .mg.phone { --cs: min(12.4vw, 52px); flex-direction: column; gap: 8px; }
     .mg .side { display: flex; flex-direction: column; gap: 1.2vh; min-width: 15vw; align-items: center; }
@@ -143,11 +155,23 @@
       <div class="gi">${(g.items || []).map(i => `<span class="${i.cur >= i.target ? 'done' : ''}">${i.type === 'Score' ? `${Math.min(i.cur, i.target).toLocaleString()} / ${i.target.toLocaleString()}` : `${Math.min(i.cur, i.target)}/${i.target} ${esc(i.label)}`}</span>`).join('')}</div></div>`;
   }
 
-  function handHtml(m) {
+  function handHtml(m, sel) {
     const h = m.hand || [];
-    const face = (c, cls, lbl) => `<button class="hc ${cls} ${c.type} c-${c.type}" ${cls === 'deck' ? 'data-act="swap"' : ''}><div class="face">${c.image ? `<img src="/art/${encodeURIComponent(c.image)}" alt="" draggable="false">` : ''}</div><small>${lbl}</small></button>`;
-    return `<div class="hand">${h[0] ? face(h[0], 'active', esc(h[0].name)) : ''}${h[1] ? face(h[1], 'deck', 'tap to swap') : ''}
-      ${!h.length ? `<button class="pill" data-act="finish">End level</button>` : ''}</div>`;
+    const activeCid = sel || h[0]?.cid;
+    const face = c => `<button class="hc ${c.type} c-${c.type}${c.cid === activeCid ? ' sel' : ''}" data-act="pick" data-arg="${c.cid}"><div class="face">${c.image ? `<img src="/art/${encodeURIComponent(c.image)}" alt="" draggable="false">` : ''}</div><small>${esc(c.name)}</small></button>`;
+    return `<div class="hand">${h.map(face).join('')}${!h.length ? `<button class="pill" data-act="finish">End level</button>` : ''}</div>`;
+  }
+
+  // the 7-second drop timer
+  function timerHtml(m) { return m.moveLeft == null ? '' : `<div class="mg-timer"><i></i></div>`; }
+
+  // the five colour-restricted pads: tap one to drop the selected card there (it clears every matching request)
+  function padsHtml(m, sel) {
+    const active = (m.hand || []).find(c => c.cid === sel) || m.hand?.[0];
+    const ok = k => active && (active.type === 'Wild' || active.type === 'Fx' || ((m.pads?.[k]?.accepts) || []).includes(active.type));
+    return `<div class="mg-pads">${(m.pads || []).map((p, k) => `<button class="mgpad${ok(k) ? ' ok' : ''}" data-act="drop" data-arg="${k}">
+      <div class="art">${p.image ? `<img src="/art/${encodeURIComponent(p.image)}?v=${window.__cardVer || 0}" alt="" draggable="false">` : ''}</div>
+      <div class="pc">${(p.accepts || []).map(t => `<i style="background:${COL[t] || '#fff'}"></i>`).join('')}</div>${p.stack > 1 ? `<span class="n">×${p.stack}</span>` : ''}</button>`).join('')}</div>`;
   }
 
   function lobbyHtml(m, phone) {
@@ -169,16 +193,16 @@
           <button class="pill${m.unlockAll ? ' solid' : ''}" data-act="unlockall">${m.unlockAll ? 'All unlocked' : 'Unlock all'}</button></div>`}</div>`;
   }
 
-  function gameHtml(m, phone) {
+  function gameHtml(m, phone, sel) {
     const bg = m.level?.bg ? `background-image:url('/art/${encodeURIComponent(m.level.bg)}')` : '';
-    const active = m.hand?.[0];
+    const active = (m.hand || []).find(c => c.cid === sel) || m.hand?.[0];
     const banner = m.phase === 'reveal' ? `<div class="banner"><div>ROUND ${m.round + 1}/${m.rounds}<small>${esc(m.goal?.text || '')}</small></div></div>`
       : m.phase === 'goal' ? `<div class="banner"><div>GOAL COMPLETE!<small>Bonus +${(m.bonus || 0).toLocaleString()}</small></div></div>` : '';
     const grid = `<div class="gridbox" style="${bg}"><div class="grid">${(m.grid || []).flat().map(c => cellHtml(c, active)).join('')}</div>${banner}</div>`;
     const stats = `<div class="stat"><small>Score</small><b>${m.score.toLocaleString()}</b></div><div class="mult">×${m.mult}</div>`;
     const deck = `<div class="stat"><small>Deck</small><b>${m.deckLeft}</b></div>`;
-    if (phone) return `<div class="side">${stats}${goalHtml(m)}${deck}</div>${grid}${handHtml(m)}`;
-    return `<div class="side">${stats}${goalHtml(m)}</div>${grid}<div class="side">${handHtml(m)}${deck}</div>`;
+    if (phone) return `<div class="side">${stats}${goalHtml(m)}${deck}</div>${timerHtml(m)}${grid}${padsHtml(m, sel)}${handHtml(m, sel)}`;
+    return `<div class="side">${stats}${goalHtml(m)}</div>${timerHtml(m)}${grid}${padsHtml(m, sel)}<div class="side">${handHtml(m, sel)}${deck}</div>`;
   }
 
   // ---- path drawing ----
@@ -237,15 +261,27 @@
     render(root, m, act, opts = {}) {
       const phone = !!opts.phone;
       root._m = m;
-      if (root._dragging) { root._pending = m; return; }   // never rebuild under a finger
+      // keep the selected hand card if it's still in hand, else default to the first
+      if (!(m.hand || []).some(c => c.cid === root._sel)) root._sel = (m.hand || [])[0]?.cid || null;
       const lobby = m.phase === 'lobby' || m.phase === 'over';
-      const html = `<div class="mg${phone ? ' phone' : ''}">${lobby ? lobbyHtml(m, phone) : gameHtml(m, phone)}</div>`;
+      const html = `<div class="mg${phone ? ' phone' : ''}">${lobby ? lobbyHtml(m, phone) : gameHtml(m, phone, root._sel)}</div>`;
       if (root._html !== html) {
         root.innerHTML = html; root._html = html;
-        root.querySelectorAll('[data-act]').forEach(b => b.onclick = () => act(b.dataset.act, b.dataset.arg));
-        if (!lobby) bindGrid(root, () => root._m, act);
+        root.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+          const a = b.dataset.act;
+          if (a === 'pick') { root._sel = b.dataset.arg; MixGrid.render(root, root._m, act, opts); return; }   // select which card to drop
+          if (a === 'drop') { const sel = root._sel || (root._m.hand || [])[0]?.cid; if (sel) act('drop', `${sel}|${b.dataset.arg}`); return; }
+          act(a, b.dataset.arg);
+        });
         root._flush = () => { if (root._pending) { const p = root._pending; root._pending = null; MixGrid.render(root, p, act, opts); } };
       }
+      // the drop timer bar: resync to the server's live value each update, draining to 0 over the time left
+      const tEl = root.querySelector('.mg-timer i');
+      if (tEl && m.moveLeft != null && m.moveLeft !== root._tml) {
+        root._tml = m.moveLeft;
+        tEl.style.transition = 'none'; tEl.style.width = (m.moveLeft / (m.moveMax || 7) * 100).toFixed(1) + '%'; void tEl.offsetWidth;
+        tEl.style.transition = `width ${m.moveLeft.toFixed(2)}s linear`; tEl.style.width = '0%';
+      } else if (m.moveLeft == null) root._tml = null;
       // score pop + flash on each new play
       if (m.last && m.last.id !== root._lastId) {
         const first = root._lastId === undefined; root._lastId = m.last.id;

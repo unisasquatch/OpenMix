@@ -45,6 +45,40 @@ public static class SelfTest
         Check(CardSignature.OnCurve(tq) && CardSignature.VerifyCard(0x0123_0000_1122_3344UL, tsig, tq), "ECDSA sign/verify round trip");
         Check(!CardSignature.VerifyCard(0x0123_0000_1122_3345UL, tsig, tq), "ECDSA rejects another UID");
         Check(CardSignature.VerifyCard(0x0123_0000_1122_3344UL, new byte[] { 0x20 }.Concat(tsig).ToArray(), tq), "ECDSA finds r||s after a leading byte");
+
+        // portable verified-cards save: round trip, re-verification, one entry per signed serial
+        var saveDir = Path.Combine(Path.GetTempPath(), "openmix-selftest-" + Guid.NewGuid().ToString("n"));
+        try
+        {
+            var save = Path.Combine(saveDir, "saves", "verified-cards.json");
+            ulong u1 = 0x0123_0000_1122_3344UL, u2 = 0x0456_0000_5566_7788UL;
+            var s2 = CardSignature.SignForTest(u2, tk, 123456789);
+            var at = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+            VerifiedCardsFile.Save(save, new[] { new VerifiedCardsFile.VerifiedCard(u1, tsig, at), new VerifiedCardsFile.VerifiedCard(u2, s2, at) });
+            var rt = VerifiedCardsFile.Load(save, tq);
+            Check(rt.Error == null && rt.Rejected == 0 && rt.Cards.Count == 2 && rt.Cards[0].Uid == u1 && rt.Cards[1].Sig.SequenceEqual(s2) && rt.Cards[0].Added == at,
+                "verified-cards save: round trip keeps UIDs, signatures and dates");
+            Check(VerifiedCardsFile.Load(save).Cards.Count == 0, "verified-cards save: test-key signatures fail the real card key");
+
+            // a tampered signature, a forged UID, and a second card type claiming an already-used serial are all dropped
+            var text = File.ReadAllText(save);
+            var badSig = text.Replace(Convert.ToHexString(s2), Convert.ToHexString(s2)[..^2] + (Convert.ToHexString(s2)[^2..] == "00" ? "01" : "00"));
+            File.WriteAllText(save, badSig);
+            var v1 = VerifiedCardsFile.Load(save, tq);
+            Check(v1.Cards.Count == 1 && v1.Rejected == 1, "verified-cards save: a changed signature is rejected");
+            File.WriteAllText(save, text.Replace(u2.ToString("X16"), 0x0456_0000_5566_7789UL.ToString("X16")));
+            var v2 = VerifiedCardsFile.Load(save, tq);
+            Check(v2.Cards.Count == 1 && v2.Rejected == 1, "verified-cards save: a changed serial is rejected");
+            ulong sameSerialOtherCard = 0x0999_0000_1122_3344UL;   // card type bits changed; the signature still verifies
+            VerifiedCardsFile.Save(save, new[] { new VerifiedCardsFile.VerifiedCard(u1, tsig, at), new VerifiedCardsFile.VerifiedCard(sameSerialOtherCard, tsig, at) });
+            var v3 = VerifiedCardsFile.Load(save, tq);
+            Check(v3.Cards.Count == 1 && v3.Rejected == 1 && v3.Cards[0].Uid == u1, "verified-cards save: one signed serial counts as one card");
+            File.WriteAllText(save, "{\"format\":\"something-else\",\"version\":1,\"cards\":[]}");
+            Check(VerifiedCardsFile.Load(save, tq).Error != null, "verified-cards save: other files are refused");
+            File.WriteAllText(save, "not json");
+            Check(VerifiedCardsFile.Load(save, tq) is { Error: not null, Cards.Count: 0 }, "verified-cards save: a corrupt file loads nothing");
+        }
+        finally { try { Directory.Delete(saveDir, true); } catch { } }
         Check(!CardSignature.VerifyCard(0x0123_0000_1122_3344UL, tsig), "ECDSA rejects a foreign key's signature");
         Check(sig[0] == 0xA6 && sig[1] == 0xFF && sig[2] == 0x88 && sig[3] == 0x99 && sig[7] == 0xDD,
             "A6 signature request carries low 48 bits big-endian");

@@ -31,11 +31,29 @@
   // ---- stage ----
   document.body.insertAdjacentHTML('beforeend', '<div id="ostage-wrap"><div id="ostage"></div></div>');
   const stage = $('#ostage');
+  // The game is a fixed 16:9 stage, scaled to fit (letterboxed). "Wide" menu screens (collection/settings/mixes)
+  // instead fit to height and stretch the stage to the full viewport width, so they use an ultrawide screen.
+  let __wide = false;
   function fit() {
-    const k = Math.min(innerWidth / 1920, innerHeight / 1080);
+    const k = __wide ? innerHeight / 1080 : Math.min(innerWidth / 1920, innerHeight / 1080);
+    stage.style.width = __wide ? Math.max(1920, Math.ceil(innerWidth / k)) + 'px' : '1920px';
     stage.style.transform = `translate(-50%, -50%) scale(${k})`;
   }
+  function setWide(w) { if (w === __wide) return; __wide = w; stage.classList.toggle('wide', w); fit(); }
+  window.setWide = setWide;
   addEventListener('resize', fit); fit();
+
+  // Fullscreen: in the native app window only the host can cover the monitor (web message); in a browser use the
+  // Fullscreen API. F11 (or the Settings toggle) calls this.
+  function toggleFullscreen() {
+    try {
+      if (window.external && typeof window.external.sendMessage === 'function') { window.external.sendMessage('fullscreen'); return; }
+    } catch (e) {}
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+    else document.exitFullscreen?.();
+  }
+  window.toggleFullscreen = toggleFullscreen;
+  addEventListener('keydown', e => { if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); } });
 
   // Persistent layers so animations aren't restarted on every state update.
   const layer = (id, cls) => { let el = stage.querySelector('#' + id); if (!el) { el = document.createElement('div'); el.id = id; if (cls) el.className = cls; stage.appendChild(el); } return el; };
@@ -52,7 +70,7 @@
       // studio volume tint)
       const cc = c.type === 'Wild' ? g1 : (COL[c.type] || '#fff');
       return `<div class="o-slot" data-pad="${k}" data-ty="${c.type}" style="--c:${cc};--bloom:${vuBloom(c.type)}"><div class="vu">${[0, 1, 2].map(i => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div>
-        <div class="art"><img src="/art/${encodeURIComponent(c.image)}" alt="" draggable="false"></div></div>`;
+        <div class="art"><img src="/art/${encodeURIComponent(c.image)}?v=${window.__cardVer || 0}" alt="" draggable="false"></div></div>`;
     }).join('');
   }
 
@@ -117,13 +135,15 @@
   let lastTiles = '', tileSeen = new Set(), lastState = {}, menuHook = null;
 
   function partyLobby(state, m) {
-    const players = (state.players || []).map(p => p.name);
-    const label = k => { const i = k - 1; return k >= 1 && k <= 3 && players[i] ? `<div><img src="/ui/sys_player" style="height:120px;filter:brightness(0) invert(1)"><small>${esc(players[i]).toUpperCase()}</small></div>` : null; };
+    const players = (state.players || []);
+    const label = k => { const i = k - 1; if (!(k >= 1 && k <= 3 && players[i])) return null; const p = players[i];
+      const nm = p.board ? `PLAYER ${i + 1}` : esc(p.name).toUpperCase();   // board players are anonymous (no phone name), as the original
+      return `<div><img src="/ui/sys_player" style="height:120px;filter:brightness(0) invert(1)"><small>${nm}</small></div>`; };
     const join = k => k >= 1 && k <= 3 && !players[k - 1];
     const best = m.highScore || 0;
     const url = (window.__joinUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
     setHtml(layer('p-base'), `<div class="o-dots"></div>
-      <div class="o-topbar"><div class="l"><img data-a="mn-go" data-to="modes" src="/ui/sys_back" alt="back" style="filter:invert(0)"></div>${LU('Menu_PartySetup', 'PARTY')}<div class="r"><img data-a="scores" src="/ui/sys_leaderboard_icon" alt=""><img src="/ui/sys_question" alt=""></div></div>
+      <div class="o-topbar"><div class="l"><img data-a="mn-go" data-to="modes" src="/ui/sys_back" alt="back" style="filter:invert(0)"></div>${LU('Menu_PartySetup', 'PARTY')}<div class="r"><img data-a="scores" src="/ui/sys_leaderboard_icon" alt=""><span data-a="connect" class="cn-ic" title="Connect a phone" aria-label="Connect a phone">${WIFI_SVG}</span></div></div>
       <div class="o-center" style="justify-content:flex-start;top:195px"><div class="o-heavy" style="font-size:84px;letter-spacing:.09em">${players.length ? LU('IconSelect_AddIcon', 'PLACE A DECK TO JOIN') : 'JOIN ON YOUR PHONE'}</div></div>
       <div class="o-slots" style="top:375px">${slotsHtml(state, { label, join })}</div>
       <div class="o-center" style="justify-content:flex-start;top:735px">
@@ -319,7 +339,7 @@
     lastTops = tops;
 
     setHtml(layer('f-base'), `<div class="o-dots"></div>
-      <div class="o-topbar"><div class="l"><span data-a="menu" style="font-size:64px;cursor:pointer;line-height:1">︿</span></div>FREESTYLE<div class="r"><div class="o-icon mx-save" data-a="mix-save" style="position:static"><img src="/ui/sys_mixes_add" alt=""></div></div></div>`);
+      <div class="o-topbar"><div class="l"><span data-a="menu" style="font-size:64px;cursor:pointer;line-height:1">︿</span></div>FREESTYLE<div class="r"><div class="o-icon" data-a="connect" style="position:static;color:#000" title="Connect a phone">${WIFI_SVG}</div><div class="o-icon mx-save" data-a="mix-save" style="position:static"><img src="/ui/sys_mixes_add" alt=""></div></div></div>`);
 
     // slots; with the studio panel open, a volume line across each card (drag the card up/down)
     const slots = layer('f-slots');
@@ -651,7 +671,7 @@
     const join = k => (k === 1 && !red.length) || (k === 3 && !blue.length);
     const ready = red.length && blue.length;
     setHtml(layer('c-base'), `<div class="o-dots"></div>
-      <div class="o-topbar"><div class="l"><img data-a="mn-go" data-to="modes" src="/ui/sys_back" alt="back"></div>${LU('Menu_IconSelect', 'CLASH')}<div class="r"><img src="/ui/sys_question" alt=""></div></div>
+      <div class="o-topbar"><div class="l"><img data-a="mn-go" data-to="modes" src="/ui/sys_back" alt="back"></div>${LU('Menu_IconSelect', 'CLASH')}<div class="r"><span data-a="connect" class="cn-ic" title="Connect a phone" aria-label="Connect a phone">${WIFI_SVG}</span></div></div>
       <div class="o-center" style="justify-content:flex-start;top:195px"><div class="o-heavy" style="font-size:84px;letter-spacing:.09em">${ready ? LU('IconSelect_HitButton', 'BEGIN: <sprite name="dropmix">') : 'JOIN A TEAM ON YOUR PHONE'}</div></div>
       <div class="o-slots" style="top:375px">${slotsHtml(state, { label, join })}</div>
       <img src="/ui/shadow_clash_color" alt="" style="position:absolute;left:810px;top:350px;width:300px;pointer-events:none" onerror="this.remove()">
@@ -704,12 +724,12 @@
     const col = state.pads.map((p, k) => {
       const c = p.top, cols = SLOT_COL[k], top = k * 202.5;
       const err = (m.errors || []).find(x => x.slot === k);
-      if (c && err) return `<div class="c-slot c-foul" style="top:${top}px"><div class="art">${c.image ? `<img src="/art/${encodeURIComponent(c.image)}" alt="">` : ''}</div><div class="bad"></div></div>`;
+      if (c && err) return `<div class="c-slot c-foul" style="top:${top}px"><div class="art">${c.image ? `<img src="/art/${encodeURIComponent(c.image)}?v=${window.__cardVer || 0}" alt="">` : ''}</div><div class="bad"></div></div>`;
       if (!c) return `<div class="c-slot" style="top:${top}px;--g1:${cols[0]};--g2:${cols[cols.length - 1]}"><img class="frame" src="/ui/shell_slot_0${4 - k}" alt=""></div>`;
       const n = Math.max(0, Math.min(3, c.power || 0)), side = p.owner === 'Red' ? 'l' : 'r';
       const colours = c.type === 'Wild' ? cols : [COL[c.type] || '#fff'];
       const bars = [0, 1, 2].map(i => { const lit = (2 - i) < n; return `<i style="${lit ? `background:${colours[Math.min(colours.length - 1, 2 - i)] || colours[0]}` : ''}"></i>`; }).join('');
-      return `<div class="c-slot" style="top:${top}px"><div class="c-bars ${side}">${bars}</div><div class="art"><img src="/art/${encodeURIComponent(c.image)}" alt=""></div>${p.silenced ? '<div class="x"></div>' : ''}</div>`;
+      return `<div class="c-slot" style="top:${top}px"><div class="c-bars ${side}">${bars}</div><div class="art"><img src="/art/${encodeURIComponent(c.image)}?v=${window.__cardVer || 0}" alt=""></div>${p.silenced ? '<div class="x"></div>' : ''}</div>`;
     }).join('');
     setHtml(layer('c-col', 'c-col'), col);
     const errs = m.errors || [];
@@ -849,7 +869,7 @@
     const label = k => k === 2 && chosen.length ? `<div style="display:flex;gap:10px;justify-content:center">${chosen.map(pl => `<img src="/ui/i_${pl}" style="width:70px;height:70px;border-radius:10px">`).join('')}</div>` : null;
     const best = (m.leaderboard || [])[0]?.score || 0;
     setHtml(layer('l-base'), `<div class="o-dots"></div>
-      <div class="o-topbar"><div class="l"><img data-a="mn-go" data-to="modes" src="/ui/sys_back" alt="back"></div>${LU('Menu_PuzzleSetup', 'PUZZLE')}<div class="r"><img data-a="scores" src="/ui/sys_leaderboard_icon" alt=""><img src="/ui/sys_question" alt=""></div></div>
+      <div class="o-topbar"><div class="l"><img data-a="mn-go" data-to="modes" src="/ui/sys_back" alt="back"></div>${LU('Menu_PuzzleSetup', 'PUZZLE')}<div class="r"><img data-a="scores" src="/ui/sys_leaderboard_icon" alt=""><span data-a="connect" class="cn-ic" title="Connect a phone" aria-label="Connect a phone">${WIFI_SVG}</span></div></div>
       <div class="o-center" style="justify-content:flex-start;top:195px"><div class="o-heavy o-click" data-a="start" style="font-size:84px;letter-spacing:.09em;pointer-events:auto">${LU('IconSelect_HitButton', 'BEGIN: <sprite name="dropmix">')}</div></div>
       <div class="o-slots" style="top:375px">${slotsHtml(state, { label: k => label(k) })}</div>
       <style>#l-base .o-slot .frame { filter: none; opacity: .35; } #l-base .o-slot:nth-child(3) .frame { opacity: 1; filter: drop-shadow(0 0 10px #EB0C6D) drop-shadow(0 0 10px #00BFF3); }</style>
@@ -887,7 +907,7 @@
       if (c) {
         const n = Math.max(0, Math.min(3, c.power || 0)), col = c.type === 'Wild' ? g[0] : (COL[c.type] || '#fff');
         html += `<div class="l-slot" style="top:${top}px"><div class="l-bars">${[0, 1, 2].map(i => `<i style="${(2 - i) < n ? `background:${col}` : ''}"></i>`).join('')}</div>
-          <div class="art"><img src="/art/${encodeURIComponent(c.image)}" alt=""></div>${p.valid === false ? '<div class="bad"></div>' : p.silenced ? '<div class="x" style="background-image:url(/ui/remove)"></div>' : ''}</div>`;
+          <div class="art"><img src="/art/${encodeURIComponent(c.image)}?v=${window.__cardVer || 0}" alt=""></div>${p.valid === false ? '<div class="bad"></div>' : p.silenced ? '<div class="x" style="background-image:url(/ui/remove)"></div>' : ''}</div>`;
       } else html += `<div class="l-slot" style="top:${top}px;--g1:${g[0]};--g2:${g[g.length - 1]}"><img class="frame" src="/ui/shell_slot_0${4 - k}" alt=""></div>`;
       // lane cells: each request tile is 4 quarter pieces (block_corner_convex / block_edge / block_edge_top /
       // block_corner_concave / block_fill, drawn as the top-right quarter and mirrored), a white *_border layer
@@ -930,7 +950,7 @@
     const art = layer('l-art');
     if (lCard && Date.now() - lCard.at < 2200) {
       const c = lCard.card;
-      setHtml(art, `<div class="l-art" style="top:${Math.min(700, 138 + lCard.slot * 180 - 80)}px"><img src="/art/${encodeURIComponent(c.image)}" alt=""></div><div class="l-ticker">${esc(c.artist).toUpperCase()} — ${esc(c.name).toUpperCase()}</div>`);
+      setHtml(art, `<div class="l-art" style="top:${Math.min(700, 138 + lCard.slot * 180 - 80)}px"><img src="/art/${encodeURIComponent(c.image)}?v=${window.__cardVer || 0}" alt=""></div><div class="l-ticker">${esc(c.artist).toUpperCase()} — ${esc(c.name).toUpperCase()}</div>`);
     } else setHtml(art, '');
 
     // messages: intro, finale, fouls / hints, results
@@ -1014,6 +1034,13 @@
     .m-slots .ms { position: relative; width: 180px; height: 140px; }
     .m-slots .ms img.f { width: 140px; height: 140px; margin-left: 20px; transform: scaleX(-1); filter: drop-shadow(0 0 6px var(--g1)) drop-shadow(0 0 6px var(--g2)); }
     .m-slots .ms .art { position: absolute; left: 20px; top: 0; width: 140px; height: 140px; border-radius: 8px; overflow: hidden; } .m-slots .ms .art img { width: 100%; height: 100%; object-fit: cover; }
+    .m-slots .ms { cursor: pointer; border-radius: 10px; }
+    .m-slots .ms.drop { box-shadow: 0 0 0 5px #fff, 0 0 34px 6px #fff8; animation: m-droppulse 1s ease-in-out infinite; }
+    @keyframes m-droppulse { 50% { box-shadow: 0 0 0 5px #fff, 0 0 44px 12px #fffc; } }
+    .m-slots .ms .pacc { position: absolute; left: 20px; bottom: -34px; width: 140px; display: flex; justify-content: center; gap: 8px; }
+    .m-slots .ms .pacc i { width: 24px; height: 24px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+    .m-timer { position: absolute; left: 40px; right: 40px; top: 250px; height: 22px; background: #0008; border-radius: 11px; overflow: hidden; border: 2px solid #fff3; }
+    .m-timer i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #50B048, #FFF100 60%, #EB0C6D); }
     .m-banner { position: absolute; left: 0; right: 0; top: 560px; text-align: center; }
     .m-banner div { display: inline-block; background: #000d; padding: 40px 70px; border-radius: 30px; border: 4px solid #fff4; }
     .m-banner h1 { margin: 0; font-size: 84px; font-weight: 700; letter-spacing: .08em; }
@@ -1062,6 +1089,8 @@
       return;
     }
     // ---- in game ----
+    // pause / exit: MixGrid has no board, so the only way out of a level is this button (opens the PAUSED popup → MENU)
+    setHtml(layer('m-pause'), `<div class="o-icon" data-a="pause" style="left:60px;top:45px"><img src="/ui/sys_pause" alt=""></div>`);
     const g = m.goal || {};
     const goalHtml = m.encore ? `<div class="row"><div class="n" style="font-size:54px">TIME</div><div class="n">${Math.ceil(m.encoreLeft || 0)}</div></div>`
       : (g.items || []).map(it => {
@@ -1075,13 +1104,16 @@
     const handHtml = `<div class="left">${m.deckLeft}<small>DECK</small></div>
       ${hand[0] ? `<div class="hc" style="--c:${COL[hand[0].type] || '#fff'}"><img src="/art/${encodeURIComponent(hand[0].image)}" alt=""><div class="cap" style="bottom:auto;top:395px">${esc(hand[0].name).toUpperCase()}</div></div>` : `<div class="pill o-click" data-a="m-finish" style="font-size:40px;padding:24px 40px;align-self:center">END LEVEL</div>`}
       ${hand[1] ? `<div class="hc deck" data-a="m-swap" style="--c:${COL[hand[1].type] || '#fff'}"><img src="/art/${encodeURIComponent(hand[1].image)}" alt=""></div>` : ''}`;
+    const active = hand[0];
+    const canDrop = k => active && (active.type === 'Wild' || active.type === 'Fx' || (m.padAccepts?.[k] || []).includes(active.type));
     const slots = state.pads.map((p, k) => { const c = p.top, gl = SLOT_COL[k];
-      return `<div class="ms" style="--g1:${gl[0]};--g2:${gl[gl.length - 1]}">${c ? `<div class="art"><img src="/art/${encodeURIComponent(c.image)}" alt=""></div>` : `<img class="f" src="/ui/shell_slot_0${4 - k}" alt="">`}</div>`; }).join('');
+      const dots = (m.padAccepts?.[k] || []).map(t => `<i style="background:${COL[t] || '#fff'}"></i>`).join('');
+      return `<div class="ms${canDrop(k) ? ' drop' : ''}" data-a="m-drop" data-pad="${k}" style="--g1:${gl[0]};--g2:${gl[gl.length - 1]}">${c ? `<div class="art"><img src="/art/${encodeURIComponent(c.image)}?v=${window.__cardVer || 0}" alt=""></div>` : `<img class="f" src="/ui/shell_slot_0${4 - k}" alt="">`}<div class="pacc">${dots}</div></div>`; }).join('');
     const banner = m.phase === 'reveal' ? `<div class="m-banner"><div><h1>ROUND ${m.round + 1}/${m.rounds}</h1><p>${esc(g.text || '').toUpperCase()}</p></div></div>`
       : m.phase === 'goal' ? `<div class="m-banner"><div><h1>GOAL COMPLETE!</h1><p>BONUS +${(m.bonus || 0).toLocaleString()}</p></div></div>` : '';
     if (!port.querySelector('.m-grid') || port._lv !== lv.name) {
       port._lv = lv.name;
-      port.innerHTML = `<div class="pbg"></div><div class="pshade"></div><div class="m-top"></div><div class="m-grid"></div><div class="m-hand"></div><div class="m-slots"></div><div class="m-ban"></div>`;
+      port.innerHTML = `<div class="pbg"></div><div class="pshade"></div><div class="m-top"></div><div class="m-timer"><i></i></div><div class="m-grid"></div><div class="m-hand"></div><div class="m-slots"></div><div class="m-ban"></div>`;
     }
     port.querySelector('.pbg').setAttribute('style', mixgridBg(m));
     setHtml(port.querySelector('.m-top'), `<div class="m-score"><small>SCORE</small><b>${m.score.toLocaleString()}</b><i>×${m.mult}</i></div>
@@ -1089,10 +1121,9 @@
     setHtml(port.querySelector('.m-hand'), handHtml);
     setHtml(port.querySelector('.m-slots'), slots);
     setHtml(port.querySelector('.m-ban'), banner);
-    // the grid (path drawing reuses mixgrid.js)
+    // the grid is now display-only (you clear it by dropping cards on the pads); .ok marks what the active card clears
     const gridBox = port.querySelector('.m-grid');
-    if (!gridBox._dragging) {
-      const active = hand[0];
+    {
       const cells = (m.grid || []).flat().filter(Boolean).map(c => {
         const x = c.x * 145, y = (6 - c.y) * 145, k = `data-x="${c.x}" data-y="${c.y}" style="left:${x}px;top:${y}px`;
         const cls = ['cell']; if (c.tg) cls.push('tg'); if (c.wall && c.noEnd) cls.push('wall'); if (c.mustEnd) cls.push('bump'); if (c.absorb) cls.push('absorb');
@@ -1104,13 +1135,20 @@
         return `<div class="${cls.join(' ')}" ${k}">${ic.img}${ic.label && ic.label !== 'ANY COLOR' ? `<div class="lab">${ic.label}</div>` : ''}</div>`;
       }).join('');
       const html = `<div class="grid">${cells}</div>`;
-      if (gridBox._h !== html) {
-        gridBox.innerHTML = html; gridBox._h = html; gridBox._m = m;
-        gridBox.addEventListener && !gridBox._wired && (gridBox._wired = true, gridBox.addEventListener('mgmsg', e => flashMsg(e.detail)));
-        window.MixGrid.bindGrid(gridBox, () => gridBox._m, (action, arg) => host(action, { arg: String(arg) }));
-        gridBox._flush = () => {};
-      }
+      if (gridBox._h !== html) { gridBox.innerHTML = html; gridBox._h = html; }
       gridBox._m = m;
+    }
+    // the 7-second drop timer: a bar that drains, restarting whenever the server resets it (each drop / round start)
+    const tEl = port.querySelector('.m-timer i');
+    if (tEl) {
+      if (m.moveLeft == null) { tEl.style.transition = 'none'; tEl.style.width = '100%'; port._tml = null; }
+      else {
+        if (port._tml == null || m.moveLeft > port._tml + 0.3) {
+          tEl.style.transition = 'none'; tEl.style.width = '100%'; void tEl.offsetWidth;
+          tEl.style.transition = `width ${m.moveLeft.toFixed(2)}s linear`; tEl.style.width = '0%';
+        }
+        port._tml = m.moveLeft;
+      }
     }
     // score pop for each play
     if (m.last && (!mLastPlay || m.last.id !== mLastPlay)) {
@@ -1139,6 +1177,8 @@
     .mn-play img { position: absolute; inset: 0; width: 100%; height: 100%; }
     .mn-play .lb { position: absolute; left: -100px; right: -100px; top: 450px; text-align: center; font-size: 54px; letter-spacing: .16em; }
     .mn-top-ic { height: 54px; cursor: pointer; }
+    .cn-ic { display: grid; place-items: center; height: 54px; color: #fff; cursor: pointer; }
+    .cn-ic svg { pointer-events: none; }
     .col-wrap { position: absolute; left: 0; right: 0; top: 140px; height: 800px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
     .col-wrap::-webkit-scrollbar { display: none; }
     .col-row { display: flex; gap: 60px; padding: 0 80px; height: 100%; align-items: flex-start; }
@@ -1175,7 +1215,9 @@
     .bd-panel .l1 { font-size: 36px; letter-spacing: .14em; margin-bottom: 70px; }
     .bd-panel .l2 { font-size: 82px; font-weight: 800; letter-spacing: .1em; line-height: 1.25; }
     .bd-panel .l3 { font-size: 26px; letter-spacing: .08em; color: #999; margin-top: 50px; }
-    .cl-wrap { position: absolute; left: 0; right: 0; top: 150px; bottom: 30px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .cl-wrap { position: absolute; left: 0; right: 0; top: 150px; bottom: 30px; display: flex; flex-direction: column; align-items: center; text-align: center;
+      overflow-y: auto; overflow-x: hidden; padding-bottom: 24px; scrollbar-width: thin; }
+    .cl-wrap > * { flex-shrink: 0; }
     .cl-expl { font-size: 30px; line-height: 1.35; letter-spacing: .03em; color: #ccc; max-width: 1300px; }
     .cl-counts { display: flex; gap: 160px; margin-top: 26px; } .cl-counts div { display: flex; flex-direction: column; align-items: center; }
     .cl-counts b { font-family: var(--o-din); font-size: 150px; font-weight: 700; line-height: 1; } .cl-counts span { font-size: 34px; font-weight: 800; letter-spacing: .14em; }
@@ -1187,6 +1229,10 @@
     .cc-box { display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 50px 70px; background: #1b1b22; border-radius: 18px; max-width: 1100px; text-align: center; font-size: 34px; letter-spacing: .04em; }
     .cc-box b { font-size: 44px; } .cc-box small { font-size: 26px; opacity: .7; }
     .cc-btns { display: flex; gap: 40px; } .cc-btns i { font-style: normal; padding: 14px 44px; border: 2px solid #fff; border-radius: 40px; cursor: pointer; }
+    .cc-prog { position: absolute; left: 60px; right: 60px; bottom: 44px; z-index: 70; pointer-events: none; }
+    .cc-prog small { display: block; text-align: center; font-size: 26px; letter-spacing: .12em; font-weight: 700; color: #fff; text-shadow: 0 2px 10px #000; margin-bottom: 12px; }
+    .cc-prog-tr { height: 16px; background: #ffffff26; border-radius: 10px; overflow: hidden; box-shadow: 0 3px 14px #000a; }
+    .cc-prog-fl { height: 100%; border-radius: 10px; background: linear-gradient(90deg, #2aa9e0, #46c05a); transition: width .35s ease; }
     .cl-gate { position: absolute; left: 0; right: 0; top: 100px; text-align: center; font-size: 26px; line-height: 1.35; color: #ffd84a; letter-spacing: .02em; }
     .cl-gate + .cl-wrap, .cl-gate + .cl-gate + .cl-wrap { top: 200px; }
     .cl-msg { min-height: 90px; margin-top: 18px; font-size: 32px; letter-spacing: .06em; max-width: 1300px; } .cl-msg.err { color: #ff3b3b; }
@@ -1299,7 +1345,95 @@
   </style>`);
   window.__menu = null;
   let decksCache = null, decksAt = 0, mixesCache = null, mixesAt = 0;
+  let catalogCache = null, catalogAt = 0, cbDetail = null;   // collection card-grid browser
+  if (!document.getElementById('cb-style')) document.head.insertAdjacentHTML('beforeend', `<style id="cb-style">
+    .cb-load { position: absolute; top: 300px; left: 0; right: 0; text-align: center; color: #888; font-size: 34px; letter-spacing: .12em; }
+    .cb-wrap { position: absolute; left: 40px; right: 40px; top: 150px; bottom: 24px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+    .cb-top { color: #9a9aa5; font-size: 26px; letter-spacing: .14em; font-weight: 800; margin: 0 4px 24px; }
+    .cb-grp { margin-bottom: 46px; }
+    .cb-h { display: flex; align-items: baseline; gap: 20px; border-bottom: 3px solid #ffffff1f; padding-bottom: 12px; margin-bottom: 22px; }
+    .cb-h h3 { font-size: 40px; font-weight: 800; letter-spacing: .05em; margin: 0; }
+    .cb-h span { color: #7f7f8a; font-size: 24px; letter-spacing: .1em; font-weight: 700; }
+    .cb-grid { display: flex; flex-wrap: wrap; gap: 24px; }
+    .cb-card { display: block; flex: 0 0 200px; width: 200px; min-width: 0; box-sizing: border-box; background: #15151b; border: 0; border-top: 9px solid var(--cbc, #888); border-radius: 16px; padding: 0; cursor: pointer; overflow: hidden; text-align: left; color: #fff; transition: transform .08s; }
+    .cb-card:hover { transform: translateY(-4px); }
+    .cb-art { width: 100%; aspect-ratio: 1 / 1; background: #000; display: block; }
+    .cb-art img { width: 100%; height: 100%; object-fit: cover; }
+    .cb-nm { font-size: 27px; font-weight: 800; padding: 14px 16px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cb-ar { font-size: 21px; color: #a6a6b0; padding: 3px 16px 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cb-ov { position: fixed; inset: 0; background: #000b; display: grid; place-items: center; z-index: 60; }
+    .cb-det { width: 980px; max-width: 92vw; background: #16161c; border-top: 14px solid var(--cbc, #888); border-radius: 22px; padding: 46px; position: relative; display: flex; gap: 46px; box-shadow: 0 30px 90px #000; }
+    .cb-det-art { width: 360px; flex: none; aspect-ratio: 1 / 1; border-radius: 14px; overflow: hidden; background: #000; }
+    .cb-det-art img { width: 100%; height: 100%; object-fit: cover; }
+    .cb-det-info { min-width: 0; }
+    .cb-chip { display: inline-block; background: var(--cbc, #888); color: #000; font-weight: 900; font-size: 24px; letter-spacing: .08em; padding: 6px 18px; border-radius: 99px; }
+    .cb-det-info h2 { font-size: 54px; margin: 18px 0 0; line-height: 1.05; }
+    .cb-det-ar { font-size: 30px; color: #b8b8c2; margin-top: 6px; }
+    .cb-meta { font-size: 26px; color: #d0d0d8; line-height: 1.7; margin-top: 26px; }
+    .cb-ab { font-size: 24px; color: #cfcfe0; line-height: 1.5; margin-top: 24px; border-left: 5px solid var(--cbc, #888); padding-left: 18px; }
+    .cb-x { position: absolute; top: 22px; right: 26px; width: 66px; height: 66px; border: 0; border-radius: 50%; background: #ffffff1a; color: #fff; font: 700 44px/1 "Segoe UI", sans-serif; cursor: pointer; }
+    .cb-x:hover { background: #ffffff33; }
+    .cb-card.cbt-beat, .cb-det.cbt-beat { --cbc: #2aa9e0; } .cb-card.cbt-bass, .cb-det.cbt-bass { --cbc: #46c05a; }
+    .cb-card.cbt-loop, .cb-det.cbt-loop { --cbc: #e0218a; } .cb-card.cbt-lead, .cb-det.cbt-lead { --cbc: #f5c542; }
+    .cb-card.cbt-fx, .cb-det.cbt-fx { --cbc: #9b6cd6; } .cb-card.cbt-wild, .cb-det.cbt-wild { --cbc: #c9c9d2; }
+    .cb-card.cb-off .cb-art img { filter: grayscale(1) brightness(.5); }
+    .cb-badge { position: absolute; left: 10px; top: 10px; background: #000a; color: #fff; font-size: 18px; font-weight: 900; letter-spacing: .12em; padding: 4px 10px; border-radius: 7px; border: 2px solid #ffffff55; }
+    .cb-art { position: relative; }
+    .cb-acts { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 30px; }
+    .cb-btn { display: inline-flex; align-items: center; gap: 12px; background: #ffffff14; color: #fff; border: 2px solid #ffffff2e; border-radius: 99px; padding: 14px 26px; font-size: 26px; font-weight: 800; letter-spacing: .05em; cursor: pointer; }
+    .cb-btn:hover { background: #ffffff24; }
+    .cb-btn:disabled { opacity: .4; cursor: default; }
+    .cb-btn.play .tri { width: 0; height: 0; border-left: 22px solid var(--cbc, #fff); border-top: 13px solid transparent; border-bottom: 13px solid transparent; }
+    .cb-btn.play.on .tri { border: 0; width: 20px; height: 24px; background: var(--cbc, #fff); }
+    .cb-btn.off { background: var(--cbc, #888); color: #000; border-color: transparent; }
+  </style>`);
   // slide a row left to show its DELETE button (SnapshotListElement); a short tap still opens the mix
+  function bindCatalog(root) {
+    root.querySelectorAll('[data-cb]').forEach(b => b.onclick = () => showCardDetail(b.dataset.cb));
+  }
+  // the card detail is a modal on document.body, so it escapes the scaled #stage transform and covers the whole screen
+  function showCardDetail(cid) {
+    const d = catalogCache; if (!d) return;
+    const c = d.decks.flatMap(g => g.cards).find(x => x.cid === cid); if (!c) return;
+    const inst = (c.instruments || []).filter(Boolean).join(' · ');
+    const keyTxt = c.key && c.key !== 'None' ? `${esc(c.key)} ${esc((c.mode || '').toLowerCase())}` : '';
+    let ov = document.getElementById('cb-ov-layer');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'cb-ov-layer'; document.body.appendChild(ov); }
+    ov.className = 'cb-ov';
+    ov.innerHTML = `<div class="cb-det cbt-${esc(c.type)}">
+      <div class="cb-det-art"><img src="/art/${encodeURIComponent(c.image)}?v=${(lastState.gate && lastState.gate.cards && lastState.gate.cards.version) || 0}" alt="" onerror="this.style.visibility='hidden'"></div>
+      <div class="cb-det-info"><div class="cb-chip">${esc(c.type).toUpperCase()}${c.power ? ` · POWER ${c.power}` : ''}</div>
+        <h2>${esc(c.name)}</h2><div class="cb-det-ar">${esc(c.artist)}</div>
+        <div class="cb-meta">${[c.tempo ? `${c.tempo} BPM` : '', keyTxt, inst].filter(Boolean).map(esc).join('<br>')}</div>
+        ${c.ability ? `<div class="cb-ab">${esc(c.ability)}</div>` : ''}
+        <div class="cb-acts">
+          ${c.audio ? `<button class="cb-btn play" data-cbp><span class="tri"></span><span class="t">PREVIEW</span></button>` : `<button class="cb-btn" disabled>NO AUDIO</button>`}
+          <button class="cb-btn shuffle${c.disabled ? ' off' : ''}" data-cbd>${c.disabled ? 'MUTED — TAP TO ENABLE' : 'DISABLE IN GAMES'}</button>
+        </div></div>
+      <button class="cb-x" aria-label="Close">×</button></div>`;
+    const stop = () => { if (ov._au) { ov._au.pause(); ov._au = null; } ov.querySelector('.cb-btn.play')?.classList.remove('on'); };
+    ov.onclick = e => { if (e.target === ov || e.target.classList.contains('cb-x')) { stop(); ov.remove(); } };
+    const play = ov.querySelector('[data-cbp]');
+    if (play) play.onclick = () => {
+      if (ov._au) { stop(); return; }                               // toggle: tap again to stop
+      const au = new Audio(`/api/preview/${encodeURIComponent(cid)}`); ov._au = au;
+      play.classList.add('on'); play.querySelector('.t').textContent = 'LOADING…';
+      au.onplaying = () => play.querySelector('.t').textContent = 'STOP';
+      au.onended = au.onerror = () => { play.querySelector('.t').textContent = au.error ? 'NO AUDIO' : 'PREVIEW'; stop(); };
+      au.play().catch(() => { play.querySelector('.t').textContent = 'NO AUDIO'; stop(); });
+    };
+    const dis = ov.querySelector('[data-cbd]');
+    if (dis) dis.onclick = () => {
+      const enable = !!c.disabled;                                   // currently disabled -> enabling
+      dis.disabled = true;
+      post('/api/card/disable', { cid, enabled: enable }).then(() => {
+        c.disabled = !enable;
+        if (ov._au) { ov._au.pause(); ov._au = null; }               // stop any preview before the modal redraws
+        showCardDetail(cid);                                         // redraw the modal with the new state
+        window.OrigUI.render(lastState);                            // and the grid badge
+      }).catch(() => { dis.disabled = false; });
+    };
+  }
   function bindMixRows(root) {
     root.querySelectorAll('.mx-row').forEach(row => {
       if (row._bound || !row.querySelector('.mx-del')) return; row._bound = true;
@@ -1345,6 +1479,8 @@
   // SnapshotButton feedback: Snapshot_Captured / Snapshot_NotEnoughCards under the button, white snapshot_flash on success
   // export glyph (white, like the original's top-bar icons): arrow down into a tray
   const EXPORT_SVG = `<svg viewBox="0 0 48 48" width="54" height="54" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"><path d="M24 6v24M14 21l10 10 10-10"/><path d="M8 30v10h32V30"/></svg>`;
+  // Wi-Fi glyph for the "connect a phone" button (currentColor: white on the dark top bars, black in the round o-icon)
+  const WIFI_SVG = `<svg viewBox="0 0 48 48" width="54" height="54" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 20Q24 2 41 20"/><path d="M14 27Q24 14 34 27"/><path d="M20 33Q24 27 28 33"/><circle cx="24" cy="38.5" r="2" fill="currentColor" stroke="none"/></svg>`;
   function mixSaved(ok, text, btn, flash = true) {
     if (ok && flash) { const f = document.createElement('div'); f.className = 'mx-flash'; stage.appendChild(f); setTimeout(() => f.remove(), 700); mixesCache = null; }
     const r = btn.getBoundingClientRect(), sr = stage.getBoundingClientRect(), sc = sr.width / 1920;
@@ -1359,7 +1495,9 @@
     { id: 'freestyle', icon: 'sys_studio', label: 'FREESTYLE', x: 1611, count: null },
   ];
   function topbar(title, left, right) {
-    return `<div class="o-topbar">${left ? `<div class="l">${left}</div>` : ''}${title}<div class="r">${right || ''}</div></div>`;
+    // the ? on the right of every top bar opens "Connect a phone" (address + port + QR)
+    const connect = `<span data-a="connect" class="cn-ic" title="Connect a phone" aria-label="Connect a phone">${WIFI_SVG}</span>`;
+    return `<div class="o-topbar">${left ? `<div class="l">${left}</div>` : ''}${title}<div class="r">${(right || '') + connect}</div></div>`;
   }
   const backBtn = to => `<img data-a="mn-go" data-to="${to}" src="/ui/sys_back" alt="back" class="mn-top-ic">`;
   function menuSlots(state) { return `<div class="o-slots" style="top:1012px">${slotsHtml(state)}</div>`; }
@@ -1416,6 +1554,11 @@
   // the download size prompt, progress overlay and errors, driven by state.gate.cards
   function cardContentFx(state) {
     const c = (state.gate && state.gate.cards) || {};
+    // first run: choose how much card art to download (audio always comes from the user's own import)
+    if (c.prompt)
+      return `<div class="cc-ov"><div class="cc-box"><b>CARD ART</b>
+        <span>Download card files (art and the instrument audio) from the DropMix servers? You can get them for every card, or only the cards in your collection.<br>The original recorded songs stay encrypted — cards play their instrument parts.</span>
+        <div class="cc-btns"><i data-a="art-all">ALL CARDS</i><i data-a="art-coll">ONLY MY COLLECTION</i></div></div></div>`;
     if (c.state === 'confirm' && ccPrompted !== c.sizeMB) {
       ccPrompted = c.sizeMB; locLoad();
       confirmBox(clText('Menu_Settings_CardCacheDownloadCollectionConfirm', 'Fetch art and music for your cards ({0} MB)?').replace('{0}', c.sizeMB),
@@ -1430,6 +1573,10 @@
     if (c.state === 'error')
       return `<div class="cc-ov"><div class="cc-box"><span>${esc(clText(c.error, 'The card files could not be fetched.'))}</span>
         <div class="cc-btns"><i data-a="cc-dl">${esc(clText('CardCacheError_Retry', 'Retry'))}</i><i data-a="cc-cancel">OK</i></div></div></div>`;
+    // background art pull: a non-blocking progress bar (the app stays usable while it runs)
+    if (c.bg && c.bgTotal > 0)
+      return `<div class="cc-prog"><small>DOWNLOADING CARD FILES · ${c.bgDone} / ${c.bgTotal} · ${c.bgPct}%</small>
+        <div class="cc-prog-tr"><div class="cc-prog-fl" style="width:${c.bgPct}%"></div></div></div>`;
     return '';
   }
   function settingsHtml() {
@@ -1443,6 +1590,7 @@
         <div class="st-row${st.audio ? '' : ' off'}">${LU('Menu_Settings_CrowdVolume', 'Crowd')}:<div class="rt">${slider('crowd', st.crowd ?? 1, !st.audio)}</div></div>
         <div class="st-row link" data-a="st-lang">LANGUAGE<div class="rt">${({ en: 'ENGLISH', fr: 'FRANÇAIS', de: 'DEUTSCH', it: 'ITALIANO', 'es-es': 'ESPAÑOL (ES)', 'es-mx': 'ESPAÑOL (MX)', nl: 'NEDERLANDS', fi: 'SUOMI', no: 'NORSK', pl: 'POLSKI', 'pt-pt': 'PORTUGUÊS (PT)', 'pt-br': 'PORTUGUÊS (BR)', sv: 'SVENSKA' })[st.language || 'en'] || st.language}</div></div>
         <div class="st-row link" data-a="st-rem">${LU('Menu_Settings_GameplayReminders', 'Hints')}<div class="rt">${st.reminders === false ? 'OFF' : 'ON'}</div></div>
+        <div class="st-row link" data-a="fullscreen">FULLSCREEN<div class="rt">F11 <img src="/ui/sys_back" style="height:44px;transform:scaleX(-1)"></div></div>
         <div class="st-row link" data-a="st-text" data-t="openmix-about">ABOUT OPENMIX<div class="rt"><img src="/ui/sys_back" style="height:44px;transform:scaleX(-1)"></div></div>
         <div class="st-row link" data-a="st-text" data-t="openmix-privacy">OPENMIX PRIVACY<div class="rt"><img src="/ui/sys_back" style="height:44px;transform:scaleX(-1)"></div></div>
         <div class="st-row link" data-a="st-text" data-t="openmix-licenses">OPENMIX LICENCES<div class="rt"><img src="/ui/sys_back" style="height:44px;transform:scaleX(-1)"></div></div>
@@ -1457,6 +1605,7 @@
         <div class="st-row off">${LU('Menu_Settings_GameplayReminders', 'Hints')}<div class="rt"><div class="ck"></div></div></div>
         <div class="st-row off">ACCOUNT</div>
 ${cardContentRows()}
+        <div class="st-row link" data-a="st-artscope">CARD ART DOWNLOAD<div class="rt">${st.artDownload === 'collection' ? 'MY COLLECTION' : 'ALL CARDS'}</div></div>
         <div class="st-row off" style="justify-content:space-around">CREDITS<i style="width:3px;height:70px;background:#ffffff40"></i>EULA</div>
         <div class="st-row off">${LU('Menu_Settings_PrivacyPolicy', 'Privacy')}</div>
         <div class="st-ver">${LU('Menu_Settings_VersionApp', 'Version:')} ${esc(st.version || 'OpenMix').toUpperCase()}</div>
@@ -1520,7 +1669,7 @@ ${cardContentRows()}
       const fmtDate = t => { const d = new Date(t); return `${d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}<br>${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`; };
       html += `<div class="mx-list">${mixesCache && !list.length ? '<div class="mx-none">NO SAVED MIXES</div>' : ''}${list.map(x => `<div class="mx-row" data-id="${x.id}">
           <div class="mx-slide" data-a="mn-mix" data-id="${x.id}">
-            <div class="mx-th">${x.slots.map((c, k) => c ? `<img src="/art/${encodeURIComponent(c.image)}" alt="" draggable="false">` : `<i style="--c:${GLOW[k][0]}"></i>`).join('')}</div>
+            <div class="mx-th">${x.slots.map((c, k) => c ? `<img src="/art/${encodeURIComponent(c.image)}?v=${window.__cardVer || 0}" alt="" draggable="false">` : `<i style="--c:${GLOW[k][0]}"></i>`).join('')}</div>
             <div class="mx-tx"><b>${esc(x.name).toUpperCase()}</b>${x.time ? `<span>${fmtDate(x.time).toUpperCase()}</span>` : `<span>${esc(x.tempo)} BPM • ${esc(x.key)}</span>`}</div></div>
           ${x.isDefault ? '' : `<div class="mx-del" data-a="mx-del" data-id="${x.id}">DELETE</div>`}</div>`).join('')}</div>`;
     } else if (scr === 'guide') {
@@ -1534,33 +1683,24 @@ ${cardContentRows()}
     } else if (scr === 'settings') {
       html = settingsHtml();
     } else if (scr === 'decks') {
-      // Collection, used as the deck manager: lit decks are the ones virtual hands draw from
-      if (!decksCache || Date.now() - decksAt > 8000) { decksAt = Date.now(); fetch('/api/decks').then(r => r.json()).then(d => { decksCache = d; window.OrigUI.render(lastState); }).catch(() => {}); }
-      const d = decksCache;
-      html += topbar('COLLECTION', backBtn('cards'), `<img src="/ui/sys_text_guide" class="mn-top-ic" alt="">`);
-      if (d) {
-        const total = d.decks.reduce((a, x) => a + x.count, 0);
-        const s1 = LT('Season_1', 'Series 1').toUpperCase(), s2 = LT('Season_2', 'Series 2').toUpperCase(), packs = LT('Item_Playlist', 'Playlists').toUpperCase();
-        const KIND = { Starter: [s1, LT('Item_Starter', 'Starter').toUpperCase()], Playlist: [s1, packs], Discovery: [s1, 'DISCOVERY PACKS'], 'Season 2': [s2, packs], Bonus: ['BAFFLER', 'BONUS CARDS'], Promo: ['PROMO', 'CARDS'] };
-        const kinds = [...new Set(d.decks.map(x => x.kind))];
-        const groups = kinds.map(k => {
-          const g = d.decks.filter(x => x.kind === k), [h3, h4] = KIND[k] || [k.toUpperCase(), ''];
-          return `<div class="col-grp"><h3>${esc(h3)}</h3><h4>${esc(h4)}</h4><div class="col-tiles">${g.map(x => `<div class="col-tile${x.active ? ' on' : ''}" data-a="mn-deck" data-icon="${x.icon}">
-              <div class="card" style="background-image:url('/ui/${x.active ? 'icon_collection_deck_full' : 'icon_collection_deck_empty'}');${x.active ? 'filter:brightness(.78)' : ''}"><i style="-webkit-mask-image:url('/ui/${x.icon}');mask-image:url('/ui/${x.icon}');${x.active ? '' : 'background:#000'}"></i></div>
-              <div class="nm">${esc(x.name).toUpperCase()}</div><div class="ct">${x.owned ? `${x.owned}/` : ''}${x.count} CARDS</div></div>`).join('')}</div></div>`;
-        }).join('');
-        html += `<div class="col-wrap"><div class="col-row"><div class="col-stats"><h3>MY DECKS</h3><h4>IN THE VIRTUAL DECK</h4>
-            <div class="st"><i style="-webkit-mask-image:url('/ui/sys_collection_card_outline');mask-image:url('/ui/sys_collection_card_outline')"></i><div><b>${d.cardCount}</b><small>/${total}</small></div></div>
-            <div class="st o-click" data-a="mn-go" data-to="claim" title="${esc(LT('Collection_InCollection', 'Owned'))}"><i style="-webkit-mask-image:url('/ui/sys_register');mask-image:url('/ui/sys_register')"></i><div><b>${d.ownedCount || 0}</b><small>/${d.totalCards || 0}</small></div></div>
-            <div class="st o-click" data-a="mn-go" data-to="badges" title="Badges"><i style="width:150px;height:170px;-webkit-mask-image:url('/ui/icon_badgecount');mask-image:url('/ui/icon_badgecount')"></i><div><b>${badgesCache ? badgesCache.reduce((a, g) => a + g.unlocked, 0) : '…'}</b><small>/${badgesCache ? badgesCache.reduce((a, g) => a + g.badges.length, 0) : 224}</small></div></div>
-            <div style="font-size:28px;letter-spacing:.1em;color:#bbb;line-height:1.5">TAP A DECK TO TURN IT ON OR OFF.<br>CARDS ON THE BOARD ALWAYS COUNT.</div>
-            <div class="o-click" data-a="mn-decks-all" style="margin-top:30px;font-size:30px;font-weight:700;letter-spacing:.14em;text-decoration:underline">USE EVERY DECK</div></div>${groups}</div></div>`;
+      // Collection: a browser of every card (all owned), grouped by deck. Tap a card for its detail.
+      if (!catalogCache || Date.now() - catalogAt > 30000) { catalogAt = Date.now(); fetch('/api/catalog').then(r => r.json()).then(d => { catalogCache = d; window.OrigUI.render(lastState); }).catch(() => {}); }
+      const d = catalogCache;
+      html += topbar('COLLECTION', backBtn('cards'), '');
+      if (!d) html += `<div class="cb-load">LOADING COLLECTION…</div>`;
+      else {
+        const groups = d.decks.map(g => `<div class="cb-grp"><div class="cb-h"><h3>${esc(g.name).toUpperCase()}</h3><span>${g.cards.length} CARDS</span></div>
+          <div class="cb-grid">${g.cards.map(c => `<button class="cb-card cbt-${esc(c.type)}${c.disabled ? ' cb-off' : ''}" data-cb="${esc(c.cid)}">
+            <div class="cb-art"><img src="/art/${encodeURIComponent(c.image)}?v=${(lastState.gate && lastState.gate.cards && lastState.gate.cards.version) || 0}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">${c.disabled ? '<div class="cb-badge">MUTED</div>' : ''}</div>
+            <div class="cb-nm">${esc(c.name)}</div><div class="cb-ar">${esc(c.artist)}</div></button>`).join('')}</div></div>`).join('');
+        html += `<div class="cb-wrap"><div class="cb-top">${d.total} CARDS · ALL OWNED</div>${groups}</div>`;
       }
     }
-    const root = layer('mn-root'), sx = root.querySelector('.col-wrap')?.scrollLeft || 0;
-    if (scr === 'decks') html += menuSlots(state);
+    const root = layer('mn-root'), sx = root.querySelector('.col-wrap')?.scrollLeft || 0, cbTop = root.querySelector('.cb-wrap')?.scrollTop || 0;
     setHtml(root, html);
     const cw = root.querySelector('.col-wrap'); if (cw && sx) cw.scrollLeft = sx;
+    const cbw = root.querySelector('.cb-wrap'); if (cbw && cbTop) cbw.scrollTop = cbTop;
+    if (scr === 'decks') bindCatalog(root); else document.getElementById('cb-ov-layer')?.remove();
     if (scr === 'settings' && !stage.querySelector('[data-sl]')?._drag) bindSliders();
     if (scr === 'mixes') bindMixRows(root);
     if (cw && !cw._wheel) { cw._wheel = true; cw.addEventListener('wheel', e => { cw.scrollLeft += e.deltaY + e.deltaX; e.preventDefault(); }, { passive: false }); }
@@ -1803,6 +1943,45 @@ ${cardContentRows()}
   function startWalk() { window.__menu = null; stage.innerHTML = ''; stage._mode = null; post('/api/walkthrough/start', {}); }
   function closeConfirm() { cfYes = null; document.getElementById('cf-layer')?.remove(); }
 
+  // "Connect a phone" help, reachable from the Wi-Fi icon in every top bar: shows the address and port to open on a
+  // phone. Rendered on <body> (not the transformed menu stage) so it centres in the real viewport at any window size.
+  function connectBox() {
+    if (!document.getElementById('cn-style')) {
+      const s = document.createElement('style'); s.id = 'cn-style';
+      s.textContent = `#cn-layer{position:fixed;inset:0;z-index:9000;font-family:inherit}
+        #cn-layer .cn-dim{position:fixed;inset:0;background:rgba(0,0,0,.72)}
+        #cn-layer .cn-pop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:560px;max-width:92vw;box-sizing:border-box;padding:40px;background:#1c1c1c;border-radius:20px;text-align:center;box-shadow:0 0 0 3px #fff2;color:#fff}
+        #cn-layer .cn-h{font-size:30px;font-weight:800;letter-spacing:.1em;margin-bottom:14px}
+        #cn-layer .cn-sub{font-size:18px;color:#bbb;line-height:1.4;margin-bottom:18px}
+        #cn-layer .cn-url{font-size:40px;font-weight:800;letter-spacing:.02em;background:#000;border-radius:12px;padding:16px 12px;margin-bottom:22px;word-break:break-all}
+        #cn-layer .cn-qr{margin:0 auto 18px;width:fit-content;background:#fff;padding:14px;border-radius:12px}
+        #cn-layer .cn-qr img{display:block;width:220px;height:220px;image-rendering:pixelated}
+        #cn-layer .cn-alt{font-size:15px;color:#888;margin:-6px 0 18px}
+        #cn-layer .cn-alt:empty{display:none}
+        #cn-layer .cn-close{font:inherit;font-size:22px;font-weight:800;letter-spacing:.1em;padding:14px 44px;border-radius:40px;border:0;background:#fff;color:#000;cursor:pointer}`;
+      document.head.appendChild(s);
+    }
+    let el = document.getElementById('cn-layer');
+    if (!el) { el = document.createElement('div'); el.id = 'cn-layer'; el.onclick = e => { if (e.target.closest('[data-a="cn-x"]')) el.remove(); }; }
+    document.body.appendChild(el);
+    el.innerHTML = `<div class="cn-dim" data-a="cn-x"></div>
+      <div class="cn-pop"><div class="cn-h">CONNECT A PHONE</div>
+        <div class="cn-sub">On a phone or tablet on the same Wi-Fi, open its web browser and go to:</div>
+        <div class="cn-url" id="cn-url">…</div>
+        <div class="cn-qr" id="cn-qr"></div>
+        <div class="cn-alt" id="cn-alt"></div>
+        <button class="cn-close" data-a="cn-x">CLOSE</button></div>`;
+    const nice = u => u.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    fetch('/api/info').then(r => r.json()).then(info => {
+      const urls = (info.joinUrls && info.joinUrls.length) ? info.joinUrls : [location.origin + '/'];
+      const u = document.getElementById('cn-url'); if (u) u.textContent = nice(urls[0]);
+      const q = document.getElementById('cn-qr');
+      if (q && window.qrcode) { try { const qr = qrcode(0, 'M'); qr.addData(urls[0]); qr.make(); q.innerHTML = qr.createImgTag(6, 0); } catch { } }
+      const alt = document.getElementById('cn-alt');
+      if (alt && urls.length > 1) alt.textContent = 'Or: ' + urls.slice(1).map(nice).join('   ·   ');
+    }).catch(() => { const u = document.getElementById('cn-url'); if (u) u.textContent = location.host; });
+  }
+
   // ---- boot: the OpenMix notice (tap to skip), then the main menu. No third-party logos: OpenMix isn't endorsed by them ----
   function bootSplash() {
     if (sessionStorage.getItem('om-booted')) return;
@@ -1837,6 +2016,8 @@ ${cardContentRows()}
       else if (!['mix-save', 'eq', 'mx-export', 'mn-mix'].includes(a)) uiSfx('button_select');
       const m = lastState.mode || {};
       if (false) {}
+      else if (a === 'connect') connectBox();
+      else if (a === 'cn-x') document.getElementById('cn-layer')?.remove();
       else if (a === 'start') host('start');
       else if (a === 'lobby') host('lobby');
       else if (a === 'studio') post('/api/studio', { action: 'open', value: (lastState.mix || {}).studioOpen ? 0 : 1 });
@@ -1862,7 +2043,9 @@ ${cardContentRows()}
       else if (a === 'scores') { scoresOpen = true; window.OrigUI.render(lastState); }
       else if (a === 'hs-x') { scoresOpen = false; window.OrigUI.render(lastState); }
       else if (a === 'hs-reset') confirmBox(((lastState.mode || {}).id === 'party' ? LT('Party_ResetScoreConfirm', 'Clear the Party best score?') : LT('Leaderboard_DeleteConfirm', 'Clear the best scores?')).toUpperCase(), () => host('resetscores'));
+      else if (a === 'fullscreen') toggleFullscreen();
       else if (a === 'st-rem') post('/api/settings', { reminders: !(settingsCache && settingsCache.reminders !== false) }).then(r => r.json()).then(d => { settingsCache = d; window.OrigUI.render(lastState); });
+      else if (a === 'st-artscope') post('/api/settings', { artDownload: (settingsCache && settingsCache.artDownload === 'all') ? 'collection' : 'all' }).then(r => r.json()).then(d => { settingsCache = d; ccAt = 0; window.OrigUI.render(lastState); });
       else if (a === 'st-text') { const t = e.target.closest('[data-t]').dataset.t; fetch('/api/text/' + t).then(r => r.text()).then(txt => { textView = { t, txt }; window.OrigUI.render(lastState); }); }
       else if (a === 'tv-x') { textView = null; window.OrigUI.render(lastState); }
       else if (a === 'bdg-deck') { badgeDeck = e.target.closest('[data-p]').dataset.p; window.OrigUI.render(lastState); }
@@ -1886,6 +2069,7 @@ ${cardContentRows()}
       else if (a === 'm-next') host('next'); else if (a === 'm-retry') host('retry'); else if (a === 'm-skip') host('skip');
       else if (a === 'm-levels') host('levels'); else if (a === 'm-unlock') host('unlockall'); else if (a === 'm-finish') host('finish');
       else if (a === 'm-swap') host('swap');
+      else if (a === 'm-drop') { const h = (m.hand || [])[0]; const pad = +e.target.closest('[data-pad]').dataset.pad; if (h) host('drop', { arg: `${h.cid}|${pad}` }); }
       else if (a === 'mix-save') {
         const btn = e.target.closest('[data-a]');
         fetch('/api/mixes/save', { method: 'POST' }).then(async r => { const j = await r.json().catch(() => ({})); mixSaved(r.ok, r.ok ? LT('Snapshot_Captured', 'Saved') : (j.error || LT('Snapshot_NotEnoughCards', 'Add more cards first')), btn); });
@@ -1920,6 +2104,7 @@ ${cardContentRows()}
       else if (a === 'bd-ok') { bdPopup = null; window.OrigUI.render(lastState); }
       else if (a === 'cf-yes') { const f = cfYes; closeConfirm(); if (f) f(); }
       else if (a === 'cf-no') closeConfirm();
+      else if (a === 'art-all' || a === 'art-coll') post('/api/settings', { artDownload: a === 'art-coll' ? 'collection' : 'all' }).then(r => r.json()).then(d => { settingsCache = d; ccAt = 0; window.OrigUI.render(lastState); });
       else if (a === 'cc-dl') post('/api/cardcontent/download', {});
       else if (a === 'cc-cancel') post('/api/cardcontent/cancel', {});
       else if (a === 'cc-del') { locLoad(); confirmBox(clText('Menu_Settings_CardCacheDeleteConfirm', 'Remove all card art and music?'), () => post('/api/cardcontent/delete', {}).then(() => { ccAt = 0; })); }
@@ -1967,10 +2152,12 @@ ${cardContentRows()}
         const pred = clock < 0 ? target : clock + dt * S.bpm / 60;
         clock = Math.abs(target - pred) > .5 ? target : pred + (target - pred) * .1;
       }
+      // ease toward the 30 Hz samples so the bars don't step (board-agnostic: works whichever board is on screen)
+      for (let k = 0; k < 5; k++) shown[k] += ((S.lv[k] || 0) - shown[k]) * (1 - Math.exp(-dt / .04));
+      // the desktop / Freestyle board's LED strip (board.js .well-col .leds) pulses with its slot level
+      for (const el of document.querySelectorAll('.well-col[data-pad]')) el.style.setProperty('--lvl', (shown[+el.dataset.pad] || 0).toFixed(3));
       for (const el of document.querySelectorAll('.o-slot[data-pad]')) {
         const k = +el.dataset.pad, bars = el.querySelectorAll('.vu i');
-        // level: ease toward the 30 Hz samples so the bars don't step
-        shown[k] += ((S.lv[k] || 0) - shown[k]) * (1 - Math.exp(-dt / .04));
         bars.forEach((b, i) => {
           const j = jit[k]; j[i] = Math.max(.6, Math.min(1, j[i] + (Math.random() * 4 - 2) * dt));
           b.style.setProperty('--f', Math.sqrt(shown[k] * j[i]).toFixed(3));
@@ -2007,6 +2194,7 @@ ${cardContentRows()}
   window.OrigUI = {
     render(state) {
       locLoad();
+      setWide(['decks', 'settings', 'mixes'].includes(window.__menu));   // these menus use the full ultrawide width
       const r = this._render(state); drawPause();
       const n = (state.pads || []).filter(p => p.top).length;     // SnapshotManager.CanTakeSnapshot: minRequiredCards (imported)
       stage.querySelectorAll('.mx-save').forEach(b => b.classList.toggle('can', TB.snapshotMinCards != null && n >= TB.snapshotMinCards));
@@ -2025,6 +2213,7 @@ ${cardContentRows()}
       document.getElementById('ostage-wrap').classList.toggle('crowd', on && m.phase !== 'lobby' && m.id !== 'freestyle' && m.id !== 'mixplay');
       if (!on) { document.body.classList.remove('menu-open'); if (stage._mode) { stage.innerHTML = ''; stage._mode = null; } return false; }
       lastState = state;
+      window.__cardVer = (state.gate && state.gate.cards && state.gate.cards.version) || 0;   // card-art cache-bust for /art images
       if (window.__menu) {
         document.body.classList.add('orig'); document.getElementById('ostage-wrap').classList.remove('crowd');
         if (stage._mode !== 'menu') { stage.innerHTML = ''; stage._mode = 'menu'; }

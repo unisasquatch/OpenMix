@@ -159,11 +159,22 @@ public sealed class PartyMode : GameMode
     {
         _phase = Phase.Lobby; _tiles.Clear(); _pips.Clear(); _events.Clear();
         _spinning = _landed = false;
+        T.ClearBoardPlayers();
     }
 
     int HandSize => _handSizes[Math.Clamp(_players, 1, _handSizes.Length) - 1];
 
     public override bool AcceptsBoardCards => _phase != Phase.Lobby;
+
+    // "ADD YOUR DECK TO JOIN": in the lobby, a deck on a join slot (the three centre slots, as the lobby draws them)
+    // seats a co-op board player. One per slot; they stay joined after the deck is lifted, until the game (re)starts.
+    static readonly int[] JoinPads = { 1, 2, 3 };
+    public override void BoardSetup(Card card, int pad)
+    {
+        if (_phase == Phase.Lobby && Array.IndexOf(JoinPads, pad) >= 0 && T.Players.Count(p => p.Status != PlayerStatus.Orphaned) < 5)
+            T.SeatBoardPlayer(pad);
+    }
+
 
     void BeginGame()
     {
@@ -322,6 +333,7 @@ public sealed class PartyMode : GameMode
 
     public override void BoardLifted(Card card, int pad)
     {
+        if (_phase == Phase.Lobby) { T.UnseatBoardPlayer(pad); return; }   // lifting the deck withdraws the board player
         var s = T.Pads[pad];
         int i = s.FindLastIndex(pc => pc.Source == CardSource.Board && pc.Card.Cid == card.Cid);
         if (i < 0) return;

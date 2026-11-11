@@ -6,6 +6,7 @@
   #define AppVersion "0.1.0"
 #endif
 #define Stage "..\build\stage"
+#define StageAdb "..\build\stage-adb"
 
 [Setup]
 AppId={{9B1F6C2E-4A37-4E0B-8D4C-0F3A7E2B51C8}
@@ -35,12 +36,22 @@ RestartApplications=no
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Types]
+Name: "full"; Description: "Full installation (recommended)"
+Name: "custom"; Description: "Custom installation"; Flags: iscustom
+
+[Components]
+Name: "core"; Description: "OpenMix"; Types: full custom; Flags: fixed
+Name: "adb"; Description: "Android platform-tools (adb) — copy DropMix straight from a phone over USB. Not needed if you already have the game's .apk and .obb files."; Types: full custom
+
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
 Name: "firewall"; Description: "Let phones on my home network join (adds a Windows Firewall rule; asks for administrator approval)"; GroupDescription: "Network:"
 
 [Files]
-Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Stage}\*"; DestDir: "{app}"; Components: core; Flags: ignoreversion recursesubdirs createallsubdirs
+; adb (optional): its own component, staged separately so it installs only when ticked
+Source: "{#StageAdb}\platform-tools\*"; DestDir: "{app}\tools\platform-tools"; Components: adb; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
 ; files from an older version that this one no longer ships (imported content and saves live in %LOCALAPPDATA%\OpenMix)

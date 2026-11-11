@@ -13,6 +13,13 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Debug build for testing and screenshots: `dotnet publish -p:DebugTools=true` makes openmix-debug.exe,
+       which opens straight to the game UI with a simulated board (no DropMix board or cards needed). -->
+  <PropertyGroup Condition="'$(DebugTools)' == 'true'">
+    <AssemblyName>openmix-debug</AssemblyName>
+    <DefineConstants>$(DefineConstants);DEBUGTOOLS</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Include="app.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

@@ -7,7 +7,8 @@ param(
     [Parameter(Mandatory = $true)][string]$AssetStudio,
     [Parameter(Mandatory = $true)][string]$Il2CppDumper,
     [string]$Version = '0.1.0',
-    [string]$Iscc
+    [string]$Iscc,
+    [string]$PlatformToolsZip   # optional: a local platform-tools_r35.0.0-windows.zip; otherwise it is downloaded
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -72,6 +73,32 @@ Copy-Pinned $Il2CppDumper $il2 $il2cppFiles
    DumpTypeDefIndex = $true; GenerateDummyDll = $true; GenerateStruct = $false; DummyDllAddToken = $true; RequireAnyKey = $false
    ForceIl2CppVersion = $false; ForceVersion = 16; ForceDump = $false; NoRedirectedPointer = $false } |
     ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $il2 'config.json')
+
+# 2b. adb (Android platform-tools, Apache-2.0) for the optional "adb" installer component. Pinned to r35.0.0 and
+#     verified by SHA-256; staged apart from $stage so the .iss can tie it to its own component.
+$ptUrl = 'https://dl.google.com/android/repository/platform-tools_r35.0.0-windows.zip'
+$ptSha = '7AB78A8F8B305AE4D0DE647D99C43599744DE61A0838D3A47BDA0CDFFEFEE87E'
+$ptWant = @('adb.exe', 'AdbWinApi.dll', 'AdbWinUsbApi.dll', 'NOTICE.txt', 'source.properties')
+$ptOut = Join-Path $repo 'build\stage-adb\platform-tools'
+if (Test-Path (Join-Path $repo 'build\stage-adb')) { Remove-Item -Recurse -Force (Join-Path $repo 'build\stage-adb') }
+New-Item -ItemType Directory -Force $ptOut | Out-Null
+$ptZip = $PlatformToolsZip
+if (-not $ptZip) {
+    $ptZip = Join-Path $env:TEMP 'openmix-platform-tools.zip'
+    Write-Host "downloading platform-tools r35.0.0 ..."
+    Invoke-WebRequest -Uri $ptUrl -OutFile $ptZip -UseBasicParsing
+}
+$h = (Get-FileHash $ptZip -Algorithm SHA256).Hash
+if ($h -ne $ptSha) { throw "platform-tools zip SHA-256 mismatch (got $h; expected $ptSha)" }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$za = [System.IO.Compression.ZipFile]::OpenRead($ptZip)
+try {
+    foreach ($name in $ptWant) {
+        $e = $za.Entries | Where-Object { $_.FullName -eq "platform-tools/$name" } | Select-Object -First 1
+        if (-not $e) { throw "platform-tools zip is missing $name" }
+        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, (Join-Path $ptOut $name), $true)
+    }
+} finally { $za.Dispose() }
 
 # 3. a private .NET runtime folder for AssetStudioModCLI (framework-dependent), from the runtime pack publish used
 $packRoot = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.netcore.app.runtime.win-x64'

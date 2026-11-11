@@ -56,7 +56,9 @@ public abstract class GameMode
     /// IconSelect_ReadyToStart prompt + red lights) when the start must be refused.</summary>
     protected bool BoardMustBeCleared()
     {
-        if (!T.BoardHasCards) { T.RemoveCardsPrompt = false; return false; }
+        // The lobby join decks (one per seated board player) are allowed to stay on the board at start.
+        int extra = (T.BoardCardCount?.Invoke() ?? 0) - T.SeatedPads;
+        if (extra <= 0) { T.RemoveCardsPrompt = false; return false; }
         T.RemoveCardsPrompt = true;
         return true;
     }
@@ -71,6 +73,10 @@ public abstract class GameMode
     public virtual ActionResult Button(Player? p) => ActionResult.Fail("The DropMix button does nothing here.");
     public virtual ActionResult Action(Player p, string action, string? arg) => ActionResult.Fail("Unknown action.");
     public virtual ActionResult HostAction(string action, IDictionary<string, string> args) => ActionResult.Fail("Unknown action.");
+
+    /// <summary>Physical board: a deck was set down during a setup/lobby phase (when <see cref="AcceptsBoardCards"/> is
+    /// false, so it isn't a play). Lobby modes override this to seat a board player ("ADD YOUR DECK TO JOIN").</summary>
+    public virtual void BoardSetup(Card card, int pad) { }
 
     /// <summary>Physical board: a card was set down / lifted (no hand involved).</summary>
     public virtual void BoardPlaced(Card card, int pad) =>

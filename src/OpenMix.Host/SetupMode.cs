@@ -14,7 +14,9 @@ static class SetupMode
     static bool _installingAdb;
 
     // Official Android platform-tools (adb). Apache-2.0; downloaded from Google only when the user asks.
-    const string PlatformToolsUrl = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip";
+    // Pinned to r35.0.0 and verified by SHA-256 — the same release the installer bundles as its optional adb component.
+    const string PlatformToolsUrl = "https://dl.google.com/android/repository/platform-tools_r35.0.0-windows.zip";
+    const string PlatformToolsSha256 = "7AB78A8F8B305AE4D0DE647D99C43599744DE61A0838D3A47BDA0CDFFEFEE87E";
 
     static string ImportDir => Path.Combine(Path.GetDirectoryName(ContentPaths.Default)!, "import");
     static string ApkPath => Path.Combine(ImportDir, "game.apk");
@@ -191,6 +193,12 @@ static class SetupMode
             var len = new FileInfo(zip).Length;
             if (len < 1_000_000 || len > 200_000_000) throw new InvalidOperationException("the download didn't look right (unexpected size).");
             if (!LooksLikeZip(zip)) throw new InvalidOperationException("the download isn't a zip archive.");
+            await using (var fs = File.OpenRead(zip))
+            {
+                var hash = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(fs));
+                if (!hash.Equals(PlatformToolsSha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("the download didn't match the expected adb release (checksum mismatch).");
+            }
 
             Say($"extracting adb ({len / 1048576} MB)…");
             var want = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

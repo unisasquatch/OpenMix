@@ -28,6 +28,10 @@ public sealed class Player
     public required string Name { get; init; }
     public List<Card> Hand { get; } = new();
     public Side Team { get; set; }
+    /// <summary>A player sitting at the physical board (joined by placing a deck on a lobby slot), with no phone and
+    /// no virtual hand: they play physical cards, which the board reports as <see cref="CardSource.Board"/>. Shown
+    /// anonymously (the original has no names for board players), never dealt cards, and never orphaned.</summary>
+    public bool IsBoard { get; init; }
     /// <summary>This player's own virtual deck (Clash: built within the deck rules); null = draw from the shared pile.</summary>
     public List<Card>? OwnDeck { get; set; }
     internal string Token = "";
@@ -115,6 +119,49 @@ public sealed class Table
     public bool IsDeckActive(string icon) => _activeDecks == null || _activeDecks.Contains(icon);
     public IReadOnlyCollection<string>? ActiveDecks { get { lock (Lock) return _activeDecks?.ToArray(); } }
 
+    // Cards the user has switched off in the collection: still owned and still playable from the physical board,
+    // but never shuffled into the virtual draw pile or dealt to a hand.
+    readonly HashSet<string> _disabled = new(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyCollection<string> DisabledCids { get { lock (Lock) return _disabled.ToArray(); } }
+    public bool IsDisabled(string cid) { lock (Lock) return _disabled.Contains(cid); }
+
+    // The virtual deck only draws cards the player actually has: scanned into the collection, or with hand-imported
+    // audio. null = no restriction (every card). Physical board cards are always accepted regardless of this.
+    HashSet<string>? _available;
+    /// <summary>A card may be shuffled into the virtual deck: available to the player and not switched off.</summary>
+    bool InDrawPool(Card c) => (_available == null || _available.Contains(c.Cid)) && !_disabled.Contains(c.Cid);
+
+    /// <summary>Limit the virtual deck to these cards (scanned-in + audio-imported); null lifts the limit. Rebuilds the pile.</summary>
+    public void SetAvailableCards(IEnumerable<string>? cids) => Run(() =>
+    {
+        _available = cids == null ? null : new HashSet<string>(cids, StringComparer.OrdinalIgnoreCase);
+        RebuildDrawPileUnlocked();
+    });
+
+    /// <summary>Replace the whole disabled set (e.g. loaded from disk at startup) and rebuild the draw pile.</summary>
+    public void SetDisabled(IEnumerable<string> cids) => Run(() =>
+    {
+        _disabled.Clear(); foreach (var c in cids) if (!string.IsNullOrWhiteSpace(c)) _disabled.Add(c.Trim());
+        RebuildDrawPileUnlocked();
+    });
+
+    /// <summary>Turn one card on/off for the virtual deck (the collection "don't shuffle this in" toggle).</summary>
+    public void SetCardEnabled(string cid, bool enabled) => Run(() =>
+    {
+        if (enabled) _disabled.Remove(cid); else _disabled.Add(cid);
+        RebuildDrawPileUnlocked();
+    });
+
+    /// <summary>Rebuild the draw pile from the active pool, dropping disabled cards and anything already in play.</summary>
+    void RebuildDrawPileUnlocked()
+    {
+        var inPlay = new HashSet<Card>(PlayersByName.Values.SelectMany(p => p.Hand).Concat(Pads.SelectMany(s => s.Select(pc => pc.Card))));
+        Deck.Clear();
+        Deck.AddRange(ActiveCards.Where(c => !inPlay.Contains(c) && InDrawPool(c)));
+        DiscardPile.RemoveAll(c => !InDrawPool(c));
+        Shuffle(Deck);
+    }
+
     /// <summary>Choose which decks (series icons) the virtual deck draws from; null = all. Takes effect
     /// at once: the draw pile is rebuilt from the new pool, minus cards already in hands or on slots.</summary>
     public ActionResult SetActiveDecks(IEnumerable<string>? icons)
@@ -127,7 +174,7 @@ public sealed class Table
             _activeDecks = set; _activeCards = set == null ? null : pool;
             var inPlay = new HashSet<Card>(PlayersByName.Values.SelectMany(p => p.Hand).Concat(Pads.SelectMany(s => s.Select(pc => pc.Card))));
             Deck.Clear(); DiscardPile.Clear();
-            Deck.AddRange(pool.Where(c => !inPlay.Contains(c))); Shuffle(Deck);
+            Deck.AddRange(pool.Where(c => !inPlay.Contains(c) && InDrawPool(c))); Shuffle(Deck);
             Mode.DecksChanged();
         });
         return ActionResult.Success;
@@ -172,10 +219,59 @@ public sealed class Table
 
     void ResetTableUnlocked()
     {
+        ClearBoardPlayersUnlocked();
         foreach (var p in Pads) p.Clear();
         foreach (var pl in PlayersByName.Values) { pl.Hand.Clear(); pl.OwnDeck = null; }
         Deck.Clear(); DiscardPile.Clear();
-        Deck.AddRange(ActiveCards); Shuffle(Deck);
+        Deck.AddRange(ActiveCards.Where(InDrawPool)); Shuffle(Deck);
+    }
+
+    // ---------------- board players (join by placing a deck on a lobby slot) ----------------
+
+    readonly Dictionary<int, Player> _boardSeats = new();   // lobby slot -> the board player seated there
+    int _nextSeat = 1;
+
+    /// <summary>Seat a board player on a lobby slot (no phone, no hand). One per slot: a repeat on a seated slot is
+    /// ignored. <paramref name="team"/> (Clash) sets their side; Side.None for co-op modes. Returns the new player,
+    /// or null if that slot already has one. Call under the table lock (from a mode's lobby placement hook).</summary>
+    internal Player? SeatBoardPlayer(int pad, Side team = Side.None)
+    {
+        if (_boardSeats.ContainsKey(pad)) return null;
+        string name; int n = _nextSeat++;
+        do { name = $"Player {n++}"; } while (PlayersByName.ContainsKey(name));
+        var p = new Player { Name = name, IsBoard = true, Team = team };
+        p.Token = NewToken(); p.Status = PlayerStatus.Connected; p.DisconnectedAt = DateTime.MinValue;
+        PlayersByName[name] = p; _boardSeats[pad] = p;
+        Mode.OnPlayerJoined(p);
+        if (team != Side.None) p.Team = team;               // pad decides the team, not OnPlayerJoined's auto-assign
+        return p;
+    }
+
+    /// <summary>How many lobby slots currently seat a board player (one deck each). Call under the lock.</summary>
+    internal int SeatedPads => _boardSeats.Count;
+
+    /// <summary>Lobby lift: a board player withdraws by lifting their deck, freeing the seat so they can change teams
+    /// (re-place elsewhere). Runs under the table lock, from a mode's lobby lift hook.</summary>
+    internal void UnseatBoardPlayer(int pad)
+    {
+        if (!_boardSeats.Remove(pad, out var p)) return;
+        PlayersByName.Remove(p.Name);
+        Mode.OnPlayerLeft(p);
+    }
+
+    /// <summary>Withdraw the board player(s) sitting on a team (Clash: when that side's slots are cleared).</summary>
+    internal void UnseatBoardTeam(Side side)
+    {
+        foreach (var pad in _boardSeats.Where(kv => kv.Value.Team == side).Select(kv => kv.Key).ToList())
+            UnseatBoardPlayer(pad);
+    }
+
+    /// <summary>Drop every board player (leaving phone players). Used when a lobby (re)starts.</summary>
+    public void ClearBoardPlayers() => Run(ClearBoardPlayersUnlocked);
+    void ClearBoardPlayersUnlocked()
+    {
+        foreach (var name in PlayersByName.Where(kv => kv.Value.IsBoard).Select(kv => kv.Key).ToList()) PlayersByName.Remove(name);
+        _boardSeats.Clear(); _nextSeat = 1;
     }
 
     // ---------------- players ----------------
@@ -258,6 +354,7 @@ public sealed class Table
 
     void RefreshOrphan(Player p)
     {
+        if (p.IsBoard) return;                               // no phone to lose: a board player stays until the lobby resets
         if (p.Connections == 0 && p.DisconnectedAt != DateTime.MinValue && DateTime.UtcNow - p.DisconnectedAt >= OrphanGrace)
             p.Status = PlayerStatus.Orphaned;
     }
@@ -316,7 +413,7 @@ public sealed class Table
         if (added && card.Cid.StartsWith("unknown_") && !Mode.AcceptsUnknownCards) return;
         Run(() =>
         {
-            if (added) { if (Mode.AcceptsBoardCards) Mode.BoardPlaced(card, pad); }
+            if (added) { if (Mode.AcceptsBoardCards) Mode.BoardPlaced(card, pad); else Mode.BoardSetup(card, pad); }
             else { Mode.BoardLifted(card, pad); if (Mode.Id is not ("freestyle" or "mixplay")) EmitMusic("card_removed"); }   // SFXCard/card_removed
         });
     }
@@ -412,6 +509,7 @@ public sealed class Table
 
     internal void DrawTo(Player p, int target)
     {
+        if (p.IsBoard) return;                               // board players hold physical cards, not a virtual hand
         while (p.Hand.Count < target && Draw(p, out var c)) p.Hand.Add(c);
     }
     internal int DrawN(Player p, int n) { int k = 0; for (; k < n && Draw(p, out var c); k++) p.Hand.Add(c); return k; }
@@ -464,7 +562,7 @@ public sealed class Table
     // ---------------- snapshots for clients ----------------
 
     public sealed record PadView(int Pad, PadCard? Top, int StackCount);
-    public sealed record PlayerView(string Name, PlayerStatus Status, int HandCount, Side Team);
+    public sealed record PlayerView(string Name, PlayerStatus Status, int HandCount, Side Team, bool Board = false);
     public sealed record Snapshot(long Version, PadView[] Pads, PlayerView[] Players, int DeckCount, Card[]? Hand, string? You, object Mode);
 
     public Snapshot Snap(string? token = null)
@@ -475,7 +573,7 @@ public sealed class Table
             return new Snapshot(
                 Version,
                 Enumerable.Range(0, PadCount).Select(i => new PadView(i, TopOf(i), Pads[i].Count)).ToArray(),
-                PlayersByName.Values.OrderBy(p => p.Name).Select(p => new PlayerView(p.Name, p.Status, p.Hand.Count, p.Team)).ToArray(),
+                PlayersByName.Values.OrderBy(p => p.Name).Select(p => new PlayerView(p.Name, p.Status, p.Hand.Count, p.Team, p.IsBoard)).ToArray(),
                 Deck.Count,
                 me?.Hand.ToArray(),
                 me?.Name,

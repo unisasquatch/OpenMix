@@ -94,7 +94,7 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 .incard .pw { position: absolute; left: 50%; bottom: 4%; transform: translateX(-50%); height: 18%; filter: brightness(0); }
 /* LED dashes under each well, one per accepted colour */
 .leds { display: flex; gap: 4px; justify-content: center; margin-top: 7px; height: 4px; width: 70%; }
-.leds i { flex: 1; max-width: 22px; border-radius: 2px; background: var(--l); box-shadow: 0 0 6px var(--l); opacity: .85; }
+.leds i { flex: 1; max-width: 22px; border-radius: 2px; background: var(--l); box-shadow: 0 0 calc(3px + 13px * var(--lvl, 0)) var(--l); opacity: calc(.35 + .65 * var(--lvl, 0)); }
 .big .leds { height: .6vh; margin-top: 1.4vh; gap: .6vw; }
 .big .leds i { max-width: 4vw; }
 .winfo { width: 100%; text-align: center; margin-top: 5px; line-height: 1.15; min-width: 0; }
