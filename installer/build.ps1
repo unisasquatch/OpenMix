@@ -1,12 +1,12 @@
 # Builds build\installer\OpenMix-Setup-<version>.exe
-#   powershell -ExecutionPolicy Bypass -File installer\build.ps1 -AssetStudio <folder> -Il2CppDumper <folder> [-Version 0.1.0] [-Iscc <ISCC.exe>]
+#   powershell -ExecutionPolicy Bypass -File installer\build.ps1 -AssetStudio <folder> -Il2CppDumper <folder> [-Version 0.1.1] [-Iscc <ISCC.exe>]
 # Needs: .NET 9 SDK, Inno Setup 6, and these exact third-party releases (their files are checked against the hashes below):
 #   AssetStudioModCLI 0.20.0, net9 build (MIT)  https://github.com/aelurum/AssetStudio/releases
 #   Il2CppDumper 6.7.46, win-x64 build (MIT)     https://github.com/Perfare/Il2CppDumper/releases
 param(
     [Parameter(Mandatory = $true)][string]$AssetStudio,
     [Parameter(Mandatory = $true)][string]$Il2CppDumper,
-    [string]$Version = '0.1.0',
+    [string]$Version = '0.1.1',
     [string]$Iscc,
     [string]$PlatformToolsZip   # optional: a local platform-tools_r35.0.0-windows.zip; otherwise it is downloaded
 )
@@ -59,8 +59,10 @@ function Copy-Pinned($from, $to, $files) {
 }
 
 # 1. the app, self-contained (no .NET install needed)
+# DebugType=none keeps the build machine's source path (which includes a home directory) out of the shipped DLLs'
+# PE debug directory; no PDBs are shipped anyway.
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-dotnet publish (Join-Path $repo 'src\OpenMix.Host') -c Release -r win-x64 --self-contained true -p:Version=$Version -o $stage
+dotnet publish (Join-Path $repo 'src\OpenMix.Host') -c Release -r win-x64 --self-contained true -p:Version=$Version -p:DebugType=none -p:DebugSymbols=false -o $stage
 if ($LASTEXITCODE) { throw 'publish failed' }
 Get-ChildItem $stage -Filter *.pdb | Remove-Item
 

@@ -9,7 +9,7 @@
     <RootNamespace>OpenMix.Host</RootNamespace>
     <OutputType>WinExe</OutputType>
     <AssemblyName>OpenMix</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
